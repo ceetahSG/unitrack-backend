@@ -14,6 +14,7 @@ point of the split:
 import json
 import uuid
 from datetime import UTC, datetime
+from typing import Optional
 
 from elasticsearch import AsyncElasticsearch
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -23,6 +24,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_authenticated
 from app.core.elasticsearch import GPS_INDEX, get_es
+from app.core.redis import get_redis, trip_eta_key
+from app.db.session import get_db
+from app.models.fleet import Bus, Route, RouteStop, Stop, Trip, TripStatus
+from app.schemas.gps import BusHistoryPathOut, GpsPoint
+from app.schemas.trip import BusArrivalOut, StopArrivalsOut, TripEtaOut
 
 # Any signed-in, active account may look up buses — students, helpers, admins
 # all need it. Not public: live vehicle positions are the fleet's whereabouts,
@@ -173,4 +179,99 @@ async def stop_arrivals(
         stop_name=stop.name,
         as_of=datetime.now(UTC),
         arrivals=arrivals[:limit],
+    )
+
+
+@router.get("/bus/{bus_id}/history", response_model=BusHistoryPathOut)
+async def get_bus_history_path(
+    bus_id: uuid.UUID,
+    from_ts: datetime = Query(
+        ..., alias="from_timestamp", description="Start timestamp (ISO 8601)"
+    ),
+    to_ts: datetime = Query(
+        ..., alias="to_timestamp", description="End timestamp (ISO 8601)"
+    ),
+    trip_id: Optional[uuid.UUID] = Query(None, description="Optional trip filter"),
+    limit: int = Query(default=500, ge=1, le=5000, description="Max points to return"),
+    es: AsyncElasticsearch = Depends(get_es),
+    db: AsyncSession = Depends(get_db),
+) -> BusHistoryPathOut:
+    """Get complete GPS path (history) for a bus within time range.
+
+    Example:
+    GET /track/bus/550e8400.../history?from_timestamp=2026-07-21T08:00:00Z&to_timestamp=2026-07-21T18:00:00Z
+    """
+
+    bus = await db.get(Bus, bus_id)
+    if bus is None:
+        raise HTTPException(status_code=404, detail=f"Bus {bus_id} not found")
+
+    if from_ts >= to_ts:
+        raise HTTPException(
+            status_code=400, detail="from_timestamp must be before to_timestamp"
+        )
+
+    if trip_id:
+        stmt = select(Trip).where(Trip.id == trip_id, Trip.bus_id == bus_id)
+        trip = await db.scalar(stmt)
+        if trip is None:
+            raise HTTPException(
+                status_code=404, detail=f"Trip {trip_id} not found for bus {bus_id}"
+            )
+
+    filters = [
+        {"term": {"bus_id": str(bus_id)}},
+        {"range": {"ts": {"gte": from_ts.isoformat(), "lte": to_ts.isoformat()}}},
+    ]
+    if trip_id:
+        filters.append({"term": {"trip_id": str(trip_id)}})
+
+    res = await es.search(
+        index="gps_points",
+        size=limit,
+        query={"bool": {"must": filters}},
+        sort=[{"ts": {"order": "asc"}}],
+        _source=["bus_id", "trip_id", "ts", "lat", "lng", "speed", "heading", "accuracy"],
+    )
+
+    points: list[GpsPoint] = []
+    trip_id_from_data = None
+
+    for hit in res["hits"]["hits"]:
+        source = hit["_source"]
+
+        if not trip_id_from_data and source.get("trip_id"):
+            trip_id_from_data = source["trip_id"]
+
+        ts_str = source.get("ts", "")
+        try:
+            ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            continue
+
+        points.append(
+            GpsPoint(
+                timestamp=ts,
+                latitude=float(source.get("lat", 0)),
+                longitude=float(source.get("lng", 0)),
+                speed=float(source["speed"]) if source.get("speed") else None,
+                heading=float(source["heading"]) if source.get("heading") else None,
+                accuracy=float(source["accuracy"]) if source.get("accuracy") else None,
+            )
+        )
+
+    trip_id_result = None
+    if trip_id_from_data:
+        try:
+            trip_id_result = uuid.UUID(trip_id_from_data)
+        except (ValueError, TypeError):
+            pass
+
+    return BusHistoryPathOut(
+        bus_id=bus_id,
+        trip_id=trip_id_result,
+        from_timestamp=from_ts,
+        to_timestamp=to_ts,
+        point_count=len(points),
+        path=points,
     )
