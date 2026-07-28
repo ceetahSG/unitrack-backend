@@ -26,3 +26,22 @@ class GpsAccepted(BaseModel):
     # Null means the fixes were stored trip-agnostically because the helper has
     # no live trip. The client should treat that as "start a trip".
     trip_id: uuid.UUID | None = None
+
+class GpsPoint(BaseModel):
+    """Single GPS coordinate with timestamp and metadata."""
+    timestamp: datetime
+    latitude: float
+    longitude: float
+    speed: float | None = None
+    heading: float | None = None
+    accuracy: float | None = None
+
+
+class BusHistoryPathOut(BaseModel):
+    """Response model for bus history path endpoint."""
+    bus_id: uuid.UUID
+    trip_id: uuid.UUID | None = None
+    from_timestamp: datetime
+    to_timestamp: datetime
+    point_count: int
+    path: list[GpsPoint]
