@@ -23,10 +23,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_authenticated
 from app.core.elasticsearch import GPS_INDEX, get_es
-from app.core.redis import get_redis, trip_eta_key
-from app.db.session import get_db
-from app.models.fleet import Route, RouteStop, Stop, Trip, TripStatus
-from app.schemas.trip import BusArrivalOut, StopArrivalsOut, TripEtaOut
 
 # Any signed-in, active account may look up buses — students, helpers, admins
 # all need it. Not public: live vehicle positions are the fleet's whereabouts,
