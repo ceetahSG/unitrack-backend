@@ -9,6 +9,15 @@ from fastapi import APIRouter, Depends, Query
 
 from app.api.deps import require_authenticated
 from app.core.elasticsearch import GPS_INDEX, get_es
+from datetime import datetime
+from typing import Optional
+from sqlalchemy import select
+from app.models.fleet import Bus, Trip
+from app.db.session import get_db
+from sqlalchemy.ext.asyncio import AsyncSession
+import uuid
+# Update existing import:
+from app.schemas.gps import GpsAccepted, GpsPoint, BusHistoryPathOut  # Add GpsPoint, BusHistoryPathOut
 
 # Any signed-in, active account may look up buses — students, helpers, admins
 # all need it. Not public: live vehicle positions are the fleet's whereabouts,
