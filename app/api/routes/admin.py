@@ -26,9 +26,11 @@ from app.api.deps import require_admin
 from app.core.authz import Principal, invalidate_principal
 from app.core.redis import get_redis
 from app.db.session import get_db
+from app.models.fleet import Bus
 from app.models.ops import Alert, AlertStatus
 from app.models.user import Helper, HelperStatus, User, UserStatus
 from app.schemas.admin import HelperOut
+from app.schemas.fleet import BusCreate, BusListCreate, BusOut
 from app.schemas.ops import AlertOut, AlertResolveIn
 
 # ---------------------------------------------------------------------------
@@ -234,3 +236,79 @@ async def resolve_alert(
         alert.acknowledged_by = admin.user_id
     await db.commit()
     return alert
+
+
+# ---------------------------------------------------------------------------
+# Fleet management (buses)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/buses", response_model=BusOut, status_code=status.HTTP_201_CREATED)
+async def create_bus(
+    body: BusCreate,
+    db: AsyncSession = Depends(get_db),
+) -> Bus:
+    """Create a new bus in the fleet."""
+    stmt = select(Bus).where(Bus.reg_no == body.reg_no)
+    existing = (await db.execute(stmt)).scalar_one_or_none()
+    if existing is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail=f"Bus with reg_no '{body.reg_no}' already exists",
+        )
+
+    bus = Bus(
+        reg_no=body.reg_no,
+        nickname=body.nickname,
+        capacity=body.capacity,
+        status=body.status,
+    )
+    db.add(bus)
+    await db.commit()
+    return bus
+
+
+@router.post("/buses/batch", response_model=list[BusOut], status_code=status.HTTP_201_CREATED)
+@router.post("/buses/list", response_model=list[BusOut], status_code=status.HTTP_201_CREATED)
+async def create_bus_list(
+    body: BusListCreate,
+    db: AsyncSession = Depends(get_db),
+) -> list[Bus]:
+    """Create multiple buses at once (batch creation)."""
+    if not body.buses:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Bus list cannot be empty")
+
+    seen = set()
+    duplicates = set()
+    for b in body.buses:
+        if b.reg_no in seen:
+            duplicates.add(b.reg_no)
+        seen.add(b.reg_no)
+
+    if duplicates:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail=f"Duplicate reg_no in payload: {', '.join(sorted(duplicates))}",
+        )
+
+    stmt = select(Bus.reg_no).where(Bus.reg_no.in_(list(seen)))
+    existing_regs = set((await db.execute(stmt)).scalars())
+    if existing_regs:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail=f"Buses already exist with reg_no: {', '.join(sorted(existing_regs))}",
+        )
+
+    new_buses = [
+        Bus(
+            reg_no=b.reg_no,
+            nickname=b.nickname,
+            capacity=b.capacity,
+            status=b.status,
+        )
+        for b in body.buses
+    ]
+    db.add_all(new_buses)
+    await db.commit()
+    return new_buses
+
