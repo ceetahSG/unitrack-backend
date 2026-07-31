@@ -15,6 +15,17 @@ class BusOut(BaseModel):
     status: BusStatus
 
 
+class BusCreate(BaseModel):
+    reg_no: str
+    nickname: str | None = None
+    capacity: int = 40
+    status: BusStatus = BusStatus.active
+
+
+class BusListCreate(BaseModel):
+    buses: list[BusCreate]
+
+
 class StopOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
