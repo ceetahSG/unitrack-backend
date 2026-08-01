@@ -5,7 +5,7 @@ still owns single-bus "latest position"; ES owns "which buses are near me".
 """
 
 from elasticsearch import AsyncElasticsearch
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 
 from app.api.deps import require_authenticated
 from app.core.elasticsearch import GPS_INDEX, get_es
