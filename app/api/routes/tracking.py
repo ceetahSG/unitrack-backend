@@ -17,10 +17,14 @@ from datetime import UTC, datetime
 from typing import Optional
 
 from elasticsearch import AsyncElasticsearch
+<<<<<<< HEAD
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+=======
+from fastapi import APIRouter, Depends, Query, HTTPException
+>>>>>>> e118d42 (add routes)
 
 from app.api.deps import require_authenticated
 from app.core.elasticsearch import GPS_INDEX, get_es
