@@ -15,6 +15,7 @@ env/
 !.env.example
 !.env.prod.example
 !.env.devdb.example
+!.env.local.example
 
 # TLS material for the prod stack (mounted into nginx). Never commit keys.
 deploy/certs/

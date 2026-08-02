@@ -1,0 +1,92 @@
+# Local development stack — runs everything a developer needs on their own machine.
+#
+# Provides PostgreSQL, Redis, and Elasticsearch on offset ports so they don't
+# clash with any other services you may have running. An init container runs
+# Alembic migrations and seeds the full dataset automatically on first start.
+#
+# Usage:
+#   cp .env.local.example .env.local
+#   docker compose -f docker-compose.local.yml up -d --build
+#
+# Then configure your .env to point at localhost with the same ports:
+#   POSTGRES_HOST=localhost  POSTGRES_PORT=5433
+#   REDIS_HOST=localhost     REDIS_PORT=6380
+#   ELASTICSEARCH_URL=http://localhost:9201
+#
+# To wipe and reseed from scratch:
+#   docker compose -f docker-compose.local.yml down -v
+#   docker compose -f docker-compose.local.yml up -d --build
+
+name: unitrack-local
+
+services:
+  postgres:
+    image: postgres:16
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-unitrack}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?copy .env.local.example to .env.local}
+      POSTGRES_DB: ${POSTGRES_DB:-unitrack}
+    volumes:
+      - local-postgres:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-unitrack}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7
+    ports:
+      - "6380:6379"
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?copy .env.local.example to .env.local}"]
+    volumes:
+      - local-redis:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    ports:
+      - "9201:9200"
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "true"
+      ELASTIC_PASSWORD: ${ELASTICSEARCH_PASSWORD:?copy .env.local.example to .env.local}
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    volumes:
+      - local-es:/usr/share/elasticsearch/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf -u elastic:${ELASTICSEARCH_PASSWORD} http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  # One-shot: migrates and seeds on every `up`. Safe to re-run — seed skips rows
+  # that already exist, and --wipe is set so it wipes first on a fresh volume.
+  init:
+    build: .
+    env_file: .env.local
+    depends_on:
+      postgres:      {condition: service_healthy}
+      redis:         {condition: service_healthy}
+      elasticsearch: {condition: service_healthy}
+    restart: "no"
+    command: >
+      sh -c "
+        alembic upgrade head &&
+        python -m scripts.seed all --wipe &&
+        echo '--- local database ready ---'
+      "
+
+volumes:
+  local-postgres:
+  local-redis:
+  local-es:

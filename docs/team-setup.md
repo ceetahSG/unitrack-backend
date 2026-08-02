@@ -1,17 +1,16 @@
 # Team Setup — UniTrack Backend
 
-This guide is for developers who are **building and testing APIs** against the shared development environment. You do not need to run Postgres, Redis, or Elasticsearch locally — they are already running on the shared VPS and pre-loaded with test data.
+This guide is for developers who are **building and testing APIs**. You run the full database stack (Postgres, Redis, Elasticsearch) locally via Docker — no shared server, no credentials to ask for.
 
 ---
 
-## What's available
+## What you get
 
-| Service | Host | Port | Notes |
-|---|---|---|---|
-| PostgreSQL 16 | `103.110.78.246` | `5433` | Database with all tables migrated |
-| Redis 7 | `103.110.78.246` | `6380` | Auth cache, GPS stream |
-| Elasticsearch 8 | `103.110.78.246` | `9201` | GPS index (`gps_points`) |
-| Live API | `https://api.kodewithmj.xyz` | `443` | Prod API (use Postman to test) |
+| Service | Local port | Notes |
+|---|---|---|
+| PostgreSQL 16 | `localhost:5433` | All tables migrated, test data pre-loaded |
+| Redis 7 | `localhost:6380` | Auth cache, GPS stream |
+| Elasticsearch 8 | `localhost:9201` | GPS index (`gps_points`) |
 
 ---
 
@@ -24,80 +23,96 @@ cd unitrack-backend
 
 ---
 
-## 2. Configure your `.env`
+## 2. Start the local database stack
 
-Copy the example and point everything at the shared VPS:
+Requires [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Mac/Windows) or Docker Engine (Linux).
 
 ```bash
-# Linux / macOS
-cp .env.example .env
+# Copy the env file — default credentials work out of the box
+cp .env.local.example .env.local          # Linux / macOS
+Copy-Item .env.local.example .env.local   # Windows PowerShell
 
-# Windows (PowerShell)
-Copy-Item .env.example .env
+# Build and start (first run takes ~2 min to pull images and seed data)
+docker compose -f docker-compose.local.yml up -d --build
 ```
 
-Then open `.env` and set these values (ask the team lead for credentials):
+The init container runs automatically: it applies all Alembic migrations and seeds the full dataset. Check progress with:
+
+```bash
+docker compose -f docker-compose.local.yml logs init -f
+```
+
+Wait for `--- local database ready ---` before starting the API.
+
+**To wipe and start fresh:**
+
+```bash
+docker compose -f docker-compose.local.yml down -v
+docker compose -f docker-compose.local.yml up -d --build
+```
+
+---
+
+## 3. Configure your `.env`
+
+Copy the example and point it at your local Docker stack:
+
+```bash
+cp .env.example .env          # Linux / macOS
+Copy-Item .env.example .env   # Windows PowerShell
+```
+
+Set these values in `.env`:
 
 ```ini
 ENV=dev
-POSTGRES_HOST=103.110.78.246
+POSTGRES_HOST=localhost
 POSTGRES_PORT=5433
 POSTGRES_USER=unitrack
-POSTGRES_PASSWORD=<ask team lead>
+POSTGRES_PASSWORD=localdev
 POSTGRES_DB=unitrack
 
-REDIS_HOST=103.110.78.246
+REDIS_HOST=localhost
 REDIS_PORT=6380
-REDIS_PASSWORD=<ask team lead>
+REDIS_PASSWORD=localdev
 
-ELASTICSEARCH_URL=http://103.110.78.246:9201
+ELASTICSEARCH_URL=http://localhost:9201
 ELASTICSEARCH_USER=elastic
-ELASTICSEARCH_PASSWORD=<ask team lead>
+ELASTICSEARCH_PASSWORD=localdev
 
-JWT_SECRET=<any value works in dev, e.g. dev-secret-key>
+JWT_SECRET=local-dev-secret
 ACCESS_TOKEN_TTL_MIN=15
 REFRESH_TOKEN_TTL_DAYS=30
 ALLOWED_STUDENT_EMAIL_DOMAINS=ulab.edu.bd
 SERVICE_TIMEZONE=Asia/Dhaka
 ```
 
-> **Note for Windows users:** The `.env` file uses Unix line endings (`LF`). VS Code handles this automatically. If you open it in Notepad it may look odd — use VS Code or Notepad++ instead.
+> **Windows users:** `.env` uses Unix line endings (`LF`). Use VS Code or Notepad++, not Notepad.
 
 ---
 
-## 3. Install dependencies
+## 4. Install dependencies
 
-The project uses [uv](https://docs.astral.sh/uv/) for dependency management. If you don't have it:
-
-```bash
-# Linux / macOS
-curl -Lsf https://astral.sh/uv/install.sh | sh
-
-# Windows (PowerShell)
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-```
-
-Then install:
+The project uses [uv](https://docs.astral.sh/uv/) for dependency management.
 
 ```bash
+# Install uv if you don't have it
+curl -Lsf https://astral.sh/uv/install.sh | sh        # Linux / macOS
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"  # Windows
+
+# Install project dependencies
 uv sync
 ```
 
 ---
 
-## 4. Run your API locally
-
-No migrations needed — the shared database is already set up. Just start the API:
+## 5. Run the API
 
 ```bash
-# Linux / macOS
-uv run uvicorn app.main:app --reload
-
-# Windows (PowerShell)
 uv run uvicorn app.main:app --reload
 ```
 
-The API connects to the shared databases defined in your `.env`. Open `http://localhost:8000/docs` to explore endpoints.
+Open `http://localhost:8000/docs` to explore all endpoints.
 
 To also run the GPS worker (streams fixes from Redis into Elasticsearch):
 
@@ -107,12 +122,27 @@ uv run python -m app.worker
 
 ---
 
-## 5. Seed the database
+## 6. Test accounts (pre-seeded)
 
-The shared database already has test data. If it ever gets dirty or needs a reset, run the seed script. It asks before wiping anything.
+| Role | Email | Password |
+|---|---|---|
+| Admin | `admin@ulab.edu.bd` | `Admin@1234` |
+| Helper | `helper1@unitrack.test` | `Helper@1234` |
+| Helper | `helper2@unitrack.test` | `Helper@1234` |
+| Student | `student1@ulab.edu.bd` | `Student@1234` |
+| Student | `student2@ulab.edu.bd` | `Student@1234` |
+| Student | `student3@ulab.edu.bd` | `Student@1234` |
+
+Both helpers are pre-approved — `POST /helper/gps` and all helper endpoints work immediately after login.
+
+---
+
+## 7. Reseed manually (optional)
+
+The Docker stack auto-seeds on startup. If you need to reseed without restarting Docker:
 
 ```bash
-# Seed everything (asks before overwriting)
+# Reseed everything (asks before wiping existing data)
 uv run python -m scripts.seed
 
 # Wipe and reseed without being asked
@@ -124,7 +154,7 @@ uv run python -m scripts.seed buses stops routes
 uv run python -m scripts.seed trips reports alerts --wipe
 ```
 
-### Available groups
+### Available seed groups
 
 | Group | What it creates |
 |---|---|
@@ -136,43 +166,22 @@ uv run python -m scripts.seed trips reports alerts --wipe
 | `reports` | 5 seat reports on the completed trips |
 | `alerts` | 2 open alerts (1 critical SOS, 1 warning breakdown) |
 
-> **Smart wipe:** if wiping a group requires clearing dependents first (e.g., buses needs trips gone due to FK constraints), the script handles it automatically and tells you what it wiped.
-
-### Test accounts (seeded)
-
-| Role | Email | Password |
-|---|---|---|
-| Admin | `admin@ulab.edu.bd` | `Admin@1234` |
-| Helper | `helper1@unitrack.test` | `Helper@1234` |
-| Helper | `helper2@unitrack.test` | `Helper@1234` |
-| Student | `student1@ulab.edu.bd` | `Student@1234` |
-| Student | `student2@ulab.edu.bd` | `Student@1234` |
-| Student | `student3@ulab.edu.bd` | `Student@1234` |
-
-Both helpers are pre-approved, so `POST /helper/gps` and all helper endpoints work immediately after login.
-
 ---
 
-## 6. Test with Postman
+## 8. Test with Postman
 
 Import both files from the `postman/` folder:
 
 1. Open Postman → **Import** → select both files at once:
    - `postman/UniTrack.postman_collection.json`
    - `postman/UniTrack.postman_environment.json`
-2. In the top-right environment dropdown, select **"UniTrack Prod"**.
-3. Go to **Auth → Login**, fill in any of the test account credentials above, and hit **Send**.
+2. In the top-right dropdown, select **"UniTrack Prod"** (or duplicate it and change `base_url` to `http://localhost:8000` for local testing).
+3. Go to **Auth → Login**, fill in any test account above, and hit **Send**.
 4. The login response auto-saves the token — every authenticated request picks it up automatically.
-
-The collection has all 27 endpoints organised by tag (Auth, Admin, Fleet, Helper, Tracking), with example request bodies pre-filled.
-
-> To test your **locally-running API** instead of the live one, duplicate the environment and change `base_url` to `http://localhost:8000`.
 
 ---
 
-## 7. API quick reference
-
-Base URL (live): `https://api.kodewithmj.xyz`
+## 9. API quick reference
 
 ### Auth
 
@@ -197,7 +206,7 @@ Base URL (live): `https://api.kodewithmj.xyz`
 | POST | `/admin/alerts/{id}/acknowledge` | Claim an alert |
 | POST | `/admin/alerts/{id}/resolve` | Close an alert with a note |
 
-### Fleet (public, authenticated)
+### Fleet (authenticated)
 
 | Method | Path | Notes |
 |---|---|---|
@@ -223,34 +232,33 @@ Base URL (live): `https://api.kodewithmj.xyz`
 |---|---|---|
 | GET | `/track/nearby` | `?lat=&lng=&radius_km=` — buses near a location |
 
-### Auth flow summary
+### Auth flow
 
 ```
-POST /auth/login
-  → { access_token, refresh_token }
-  → add  Authorization: Bearer <access_token>  to protected requests
-  → access token expires in 15 min
-  → call POST /auth/refresh with { refresh_token } for a new pair
+POST /auth/login  →  { access_token, refresh_token }
+Add: Authorization: Bearer <access_token>  to protected requests
+Access token expires in 15 min — call POST /auth/refresh to renew
 ```
 
-Roles are enforced at the router level — not just in middleware. A 403 means the token is valid but the account doesn't have the required role. A 401 means the token is missing, expired, or malformed.
+A `403` means the token is valid but the role is wrong. A `401` means the token is missing, expired, or malformed.
 
 ---
 
-## 8. Troubleshooting
+## 10. Troubleshooting
 
 | Problem | Fix |
 |---|---|
-| `Connection refused` on port 5433/6380/9201 | The VPS firewall port may not be open yet — ask the team lead to run `sudo ufw allow 5433/tcp` etc. |
-| `password authentication failed for user "unitrack"` | Check `POSTGRES_PASSWORD` in your `.env` matches what the team lead gave you |
-| `POST /helper/gps` returns 403 | The helper account is `pending` — run `uv run python -m scripts.seed users --wipe` to reset and re-approve |
-| `GET /track/nearby` returns empty | The GPS worker isn't running, or no GPS has been posted yet. Run `uv run python -m app.worker` |
-| Login returns 403 (not 401) | Account exists but isn't `active` — re-seed or approve via `POST /admin/helpers/{id}/approve` |
-| `curl` fails with unknown flags on Windows | Use `curl.exe` instead of `curl` (PowerShell aliases `curl` to `Invoke-WebRequest`) |
-| Elasticsearch `max virtual memory` crash in Docker | See `docs/dev-windows.md` §2.1 — needs a `.wslconfig` setting |
+| `docker compose` command not found | Use `docker-compose` (older Docker versions) or update Docker Desktop |
+| Init container exits with error | Run `docker compose -f docker-compose.local.yml logs init` to see the cause |
+| `Connection refused` on 5433/6380/9201 | Wait for the health checks to pass — run `docker compose -f docker-compose.local.yml ps` |
+| `password authentication failed` | Make sure `.env` values match `.env.local` (both default to `localdev`) |
+| `POST /helper/gps` returns 403 | Helper account is `pending` — run `uv run python -m scripts.seed users --wipe` |
+| `GET /track/nearby` returns empty | GPS worker isn't running, or no GPS posted yet — run `uv run python -m app.worker` |
+| Login returns 403 (not 401) | Account exists but isn't `active` — reseed or approve via `POST /admin/helpers/{id}/approve` |
+| Elasticsearch `max virtual memory` error | On Linux/WSL: `sudo sysctl -w vm.max_map_count=262144`. On Windows, see `docs/dev-windows.md` |
 
 ---
 
-## 9. Windows-specific setup
+## 11. Windows-specific setup
 
-If you are on Windows and need to run Docker locally (for a fully local stack instead of the shared VPS), follow `docs/dev-windows.md` for Docker Desktop + WSL 2 setup before the steps above.
+If you hit Elasticsearch memory errors on Windows (WSL 2), follow `docs/dev-windows.md` for the required `.wslconfig` setting before running Docker.
