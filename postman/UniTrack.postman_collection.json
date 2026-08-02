@@ -1,0 +1,1035 @@
+{
+  "info": {
+    "_postman_id": "14bdc674-dfe4-48bd-89d2-307f444f1690",
+    "name": "UniTrack API",
+    "description": "Auto-generated from OpenAPI schema. Set base_url in the environment before running.\n\nQuick start:\n1. Import this file + UniTrack.postman_environment.json\n2. Select the 'UniTrack Prod' environment\n3. Run Auth > Login \u2014 access_token is auto-stored\n4. All authenticated requests pick it up automatically.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Meta",
+      "item": [
+        {
+          "id": "fb2efa39-6c9a-4439-93f6-2d3bd2ff722e",
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": ""
+          }
+        }
+      ],
+      "id": "0bfdee77-9d4a-44c4-8e93-a5f2d70fcf06"
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "id": "baf85115-4993-434c-81d3-44f8b850069c",
+          "name": "Register Student",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/register/student",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "register",
+                "student"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@ulab.edu.bd\",\n  \"password\": \"string\",\n  \"name\": \"string\",\n  \"student_id_no\": \"string\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        {
+          "id": "992c9546-63ff-4333-8e80-161daac0502b",
+          "name": "Register Helper",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/register/helper",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "register",
+                "helper"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@ulab.edu.bd\",\n  \"password\": \"string\",\n  \"name\": \"string\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        {
+          "id": "8123031f-22bf-4722-a30b-249b4b078dcb",
+          "name": "Verify Email",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/auth/verify-email",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "verify-email"
+              ],
+              "query": [
+                {
+                  "key": "token",
+                  "value": "",
+                  "description": "",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "id": "142cfa24-3c2e-4ffe-9ddb-10644fc4f098",
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@ulab.edu.bd\",\n  \"password\": \"string\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {\n    const b = pm.response.json();\n    pm.environment.set('access_token', b.access_token);\n    pm.environment.set('refresh_token', b.refresh_token);\n    console.log('Tokens stored.');\n}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "id": "26949ddf-74fa-43c6-8b55-2f3d8e8e198d",
+          "name": "Refresh",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/refresh",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "refresh"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"string\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        {
+          "id": "b335e62a-0031-4524-943d-429f91f08897",
+          "name": "Me",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/auth/me",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "me"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": ""
+          }
+        }
+      ],
+      "id": "3058b1df-9ff2-4c90-b5c5-6d2fc770d788"
+    },
+    {
+      "name": "Admin",
+      "item": [
+        {
+          "id": "31a7a636-d217-4f8f-99a5-a8ad24d8b73e",
+          "name": "List Helpers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/helpers",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "helpers"
+              ],
+              "query": [
+                {
+                  "key": "helper_status",
+                  "value": "",
+                  "description": "Filter by approval state; omit for all.",
+                  "disabled": true
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "List helper accounts \u2014 the admin panel's approval queue.\n\nNote there is no auth code in this handler. The router guard already ran;\nby the time we are here the caller is a known, active admin."
+          }
+        },
+        {
+          "id": "2fd56f37-8019-41e8-a8b3-9aefbcf2539f",
+          "name": "Approve Helper",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/helpers/{helper_id}/approve",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "helpers",
+                "{helper_id}",
+                "approve"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Approve a pending helper so they can start sending GPS (spec \u00a78)."
+          }
+        },
+        {
+          "id": "08553966-fcb8-4a76-867b-b55ccd0164b5",
+          "name": "Suspend User",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/users/{user_id}/suspend",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "users",
+                "{user_id}",
+                "suspend"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Suspend an account. Takes effect on the caller's very next request.\n\nImmediate revocation is exactly what RULE 3 buys. A suspended user's access\ntoken is still cryptographically valid and unexpired \u2014 nothing can un-issue\nit. What stops them is `get_principal` reading a fresh snapshot that says\n`suspended` and raising 401. Skip the invalidation and that check reads a\nstale snapshot instead, so a suspended account keeps its access."
+          }
+        },
+        {
+          "id": "9a012209-bb3b-4de9-8d3e-975e2489951f",
+          "name": "List Alerts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/alerts",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "alerts"
+              ],
+              "query": [
+                {
+                  "key": "alert_status",
+                  "value": "",
+                  "description": "Defaults to open; pass null for all.",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "",
+                  "description": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "The emergency console's list \u2014 worst first, newest first within severity.\n\nBacked by `ix_alerts_status_severity`, so the default view stays an index\nscan over open rows rather than a sort of the whole table as history grows."
+          }
+        },
+        {
+          "id": "edfeb38a-a273-4e41-9c83-fe5109b26a04",
+          "name": "Acknowledge Alert",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/alerts/{alert_id}/acknowledge",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "alerts",
+                "{alert_id}",
+                "acknowledge"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Claim an alert so two admins do not work the same incident."
+          }
+        },
+        {
+          "id": "5c443e9e-0b91-4df7-95f3-95420e546181",
+          "name": "Resolve Alert",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/admin/alerts/{alert_id}/resolve",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "alerts",
+                "{alert_id}",
+                "resolve"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Close an incident. A resolved alert keeps who acknowledged it and why."
+          }
+        },
+        {
+          "id": "b6b0fbca-7ec6-4dc7-aeb9-a4312c35ff6e",
+          "name": "Create Bus",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/admin/buses",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "buses"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reg_no\": \"string\",\n  \"capacity\": 40,\n  \"status\": \"active\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Create a new bus in the fleet."
+          }
+        },
+        {
+          "id": "ca11f006-3e6d-46d4-8db5-aa57733355c5",
+          "name": "Create Bus List",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/admin/buses/list",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "buses",
+                "list"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"buses\": [\n    {\n      \"reg_no\": \"string\",\n      \"capacity\": 40,\n      \"status\": \"active\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Create multiple buses at once (batch creation)."
+          }
+        },
+        {
+          "id": "a0608911-e5a5-437e-ae41-f25f659f1bc1",
+          "name": "Create Bus List",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/admin/buses/batch",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "buses",
+                "batch"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"buses\": [\n    {\n      \"reg_no\": \"string\",\n      \"capacity\": 40,\n      \"status\": \"active\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Create multiple buses at once (batch creation)."
+          }
+        }
+      ],
+      "id": "95db512e-a6e3-4e92-8ce6-322c2b6cd1e7"
+    },
+    {
+      "name": "Fleet",
+      "item": [
+        {
+          "id": "32053803-83d8-4812-8385-b8f3723da9f9",
+          "name": "List Buses",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/fleet/buses",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "fleet",
+                "buses"
+              ],
+              "query": [
+                {
+                  "key": "only_active",
+                  "value": "",
+                  "description": "Hide inactive/maintenance buses.",
+                  "disabled": true
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "The bus picker in the helper app.\n\nReplaces typing a UUID by hand, which was the previous state of affairs and\nis exactly as error-prone as it sounds."
+          }
+        },
+        {
+          "id": "a39d6597-de2c-4a9d-bf61-809c87435e69",
+          "name": "List Routes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/fleet/routes",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "fleet",
+                "routes"
+              ],
+              "query": [
+                {
+                  "key": "only_active",
+                  "value": "",
+                  "description": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "id": "732b5f17-e905-4771-9945-a4b6f5d56bff",
+          "name": "Get Route",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/fleet/routes/{route_id}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "fleet",
+                "routes",
+                "{route_id}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "One route with its ordered stops \u2014 what the map draws.\n\n`selectinload` fetches route_stops and their stops in two extra queries\nrather than one per stop. The lazy default would issue an N+1 storm on a\nroute with thirty stops, on an endpoint every map load hits."
+          }
+        },
+        {
+          "id": "e0a5e184-e1e9-4d56-84d0-f1229f4c3f78",
+          "name": "List Stops",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/fleet/stops",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "fleet",
+                "stops"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": ""
+          }
+        }
+      ],
+      "id": "45f61ddf-b0d1-47db-b27e-45edf8b2423e"
+    },
+    {
+      "name": "Helper",
+      "item": [
+        {
+          "id": "2f9e8e2f-4251-4e8b-974a-23d878e887f4",
+          "name": "Start Trip",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/helper/trips/start",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "helper",
+                "trips",
+                "start"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bus_id\": \"00000000-0000-0000-0000-000000000000\",\n  \"route_id\": \"00000000-0000-0000-0000-000000000000\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Begin a trip. Everything the bus produces from now on binds to it."
+          }
+        },
+        {
+          "id": "b36e2b4e-5394-4eaa-9e0c-46a71e5c395d",
+          "name": "End Trip",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/helper/trips/end",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "helper",
+                "trips",
+                "end"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Close the caller's live trip.\n\nNo trip id in the path: a helper has at most one live trip, enforced by a\npartial unique index, so there is nothing to disambiguate \u2014 and no id for a\nclient to get wrong or forge."
+          }
+        },
+        {
+          "id": "283ba4bc-054e-4e0f-adfd-22e788105120",
+          "name": "Get Active Trip",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/helper/trips/active",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "helper",
+                "trips",
+                "active"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "What the app calls on launch to recover state after a restart or crash."
+          }
+        },
+        {
+          "id": "67d9f120-f3b5-40b6-86b0-d1c906c6884d",
+          "name": "Report Seats",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/helper/seats",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "helper",
+                "seats"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"occupied\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Report how full the bus is (spec \u00a76 `seat_reports`).\n\nRequires a live trip: an occupancy count with no trip cannot be attributed\nto a route or a time window, which is the only thing that makes it useful."
+          }
+        },
+        {
+          "id": "07b78d0d-4650-4449-a036-911700edfa9d",
+          "name": "Raise Alert",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/helper/alerts",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "helper",
+                "alerts"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"sos\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Raise an alert from the emergency screen (spec \u00a77.6).\n\nWorks without a live trip on purpose \u2014 a breakdown on the way to the depot\nis still a breakdown, and an SOS must never be refused on a technicality.\n\nSeverity is assigned by the server from the type; the client does not get a\nsay, or every alert would arrive critical."
+          }
+        },
+        {
+          "id": "f7f45888-97a4-4019-91ae-622e9883dfa7",
+          "name": "Ingest Gps",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/helper/gps",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "helper",
+                "gps"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bus_id\": \"00000000-0000-0000-0000-000000000000\",\n  \"points\": [\n    {\n      \"lat\": 0.0,\n      \"lng\": 0.0,\n      \"ts\": \"2024-01-01T00:00:00Z\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Receive a batch of GPS fixes from a helper device (spec \u00a77.3).\n\nWrites the newest fix to `bus:{id}:pos` (TTL 60 s) for \"where is bus 7 right\nnow\", publishes to the fleet channel for the admin live map, and XADDs every\nfix to the `gps_ingest` stream. The worker drains that stream into\nElasticsearch.\n\nTrip binding\n------------\nIf the helper has a live trip, its id rides along on every fix and the\ntrip's bus wins over whatever the client sent \u2014 the server decides which bus\na helper is driving, not the phone.\n\nFixes with no live trip are still accepted, with an empty `trip_id`. That is\na **transition allowance** for the current helper build, which has no trip\nUI yet; it is why `trip_id` is nullable downstream. Once the app ships trip\nlifecycle, make this a 409 and delete this paragraph."
+          }
+        }
+      ],
+      "id": "5f99b2fb-026d-42ec-a9cc-21887b10a4cc"
+    },
+    {
+      "name": "Tracking",
+      "item": [
+        {
+          "id": "88d84243-ec15-4919-8825-21f81aaa9d73",
+          "name": "Nearby Buses",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/track/nearby",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "track",
+                "nearby"
+              ],
+              "query": [
+                {
+                  "key": "lat",
+                  "value": "",
+                  "description": "",
+                  "disabled": false
+                },
+                {
+                  "key": "lng",
+                  "value": "",
+                  "description": "",
+                  "disabled": false
+                },
+                {
+                  "key": "radius_km",
+                  "value": "",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "",
+                  "description": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Buses with a recent fix within `radius_km`, closest first.\n\n`collapse` on bus_id returns one hit per bus; the `_geo_distance` sort makes\nthat hit the closest point and exposes its distance."
+          }
+        }
+      ],
+      "id": "40e85a85-ea7d-4953-8a00-7e0050003b70"
+    }
+  ]
+}

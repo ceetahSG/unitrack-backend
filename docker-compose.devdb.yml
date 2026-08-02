@@ -1,0 +1,106 @@
+# Shared dev-database stack.
+#
+# Provides PostgreSQL, Redis, and Elasticsearch with ports published on the
+# host so the whole team can point their local API instances at this machine.
+# An `init` container runs migrations and seeds all test data automatically
+# every time the stack comes up — the team never has to seed by hand.
+#
+# This stack is intentionally separate from docker-compose.cloudflared.yml
+# (the prod API stack). They share the same VPS but use different named
+# volumes so their data never touches.
+#
+# Usage (on the VPS):
+#   docker compose -f docker-compose.devdb.yml --env-file .env.devdb up -d --build
+#
+# Team members point their local .env at this machine:
+#   POSTGRES_HOST=<VPS_IP>   POSTGRES_PORT=5433   POSTGRES_PASSWORD=<from .env.devdb>
+#   REDIS_HOST=<VPS_IP>      REDIS_PORT=6380      REDIS_PASSWORD=<from .env.devdb>
+#   ELASTICSEARCH_URL=http://<VPS_IP>:9201
+#   ELASTICSEARCH_USER=elastic
+#   ELASTICSEARCH_PASSWORD=<from .env.devdb>
+#
+# Ports open in ufw (offset to avoid conflicts with other stacks on the VPS):
+#   ufw allow 5433/tcp   # Postgres  (standard 5432 is taken)
+#   ufw allow 6380/tcp   # Redis     (standard 6379 is taken)
+#   ufw allow 9201/tcp   # Elasticsearch (standard 9200 is taken)
+
+name: unitrack-devdb
+
+services:
+  postgres:
+    image: postgres:16
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-unitrack}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env.devdb}
+      POSTGRES_DB: ${POSTGRES_DB:-unitrack}
+    volumes:
+      - devdb-postgres:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-unitrack}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7
+    ports:
+      - "6380:6379"
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?set in .env.devdb}"]
+    volumes:
+      - devdb-redis:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    ports:
+      - "9201:9200"
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "true"
+      ELASTIC_PASSWORD: ${ELASTICSEARCH_PASSWORD:?set in .env.devdb}
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    volumes:
+      - devdb-es:/usr/share/elasticsearch/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf -u elastic:${ELASTICSEARCH_PASSWORD} http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  # One-shot: runs on every `up`, exits when done.
+  # Idempotent — alembic skips applied migrations, seeds skip existing rows.
+  init:
+    build: .
+    env_file: .env.devdb
+    environment:
+      # Admin account seeded into the dev DB
+      ADMIN_EMAIL: ${DEV_ADMIN_EMAIL:-admin@ulab.edu.bd}
+      ADMIN_PASSWORD: ${DEV_ADMIN_PASSWORD:?set in .env.devdb}
+      ADMIN_NAME: "Dev Admin"
+    depends_on:
+      postgres:      {condition: service_healthy}
+      redis:         {condition: service_healthy}
+      elasticsearch: {condition: service_healthy}
+    restart: "no"
+    command: >
+      sh -c "
+        alembic upgrade head &&
+        python -m scripts.seed_admin &&
+        python -m scripts.seed_dev &&
+        python -m scripts.dev_seed_routes &&
+        echo '--- dev database ready ---'
+      "
+
+volumes:
+  devdb-postgres:
+  devdb-redis:
+  devdb-es:

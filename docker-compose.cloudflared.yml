@@ -1,0 +1,115 @@
+# Production stack with Cloudflare Tunnel — standalone, NOT an override.
+#
+#   docker compose -f docker-compose.cloudflared.yml --env-file .env.prod up -d --build
+#
+# Topology:
+#   client --HTTPS--> Cloudflare Edge --tunnel--> cloudflared --HTTP--> nginx --HTTP--> api:8000
+#
+# Why no exposed ports:
+#   cloudflared creates an outbound connection to Cloudflare; the VPS firewall
+#   never needs 80 or 443 open. Only SSH (22) is needed on the host.
+#   Postgres, Redis, and Elasticsearch are reachable only on the internal network.
+#
+# Pre-flight checklist on the VPS:
+#   1. vm.max_map_count=262144
+#        echo 'vm.max_map_count=262144' >> /etc/sysctl.conf && sysctl -p
+#   2. Firewall: only SSH open
+#        ufw allow 22/tcp && ufw enable
+#   3. .env.prod filled from .env.prod.example with all CHANGE_ME values replaced
+#   4. Cloudflare Zero Trust → Networks → Tunnels → Create a tunnel
+#        - Connector type: Docker
+#        - Public Hostname: api.kodewithmj.xyz  →  Service: http://nginx:80
+#        - Copy the tunnel token into .env.prod as CLOUDFLARE_TUNNEL_TOKEN
+#   5. Cloudflare dashboard → SSL/TLS → set to "Full" (origin is HTTP-only inside Docker)
+#
+# Scaling note: increase api replicas and add `--workers N` to the uvicorn CMD
+# in Dockerfile to use multiple CPU cores on a bigger VPS.
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set in .env.prod}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set a strong password in .env.prod}
+      POSTGRES_DB: ${POSTGRES_DB:?set in .env.prod}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?set in .env.prod}"]
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "true"
+      ELASTIC_PASSWORD: ${ELASTICSEARCH_PASSWORD:?set in .env.prod}
+      ES_JAVA_OPTS: ${ES_JAVA_OPTS:--Xms512m -Xmx512m}
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf -u elastic:${ELASTICSEARCH_PASSWORD} http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  api:
+    build: .
+    env_file: .env.prod
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      elasticsearch: {condition: service_healthy}
+    restart: unless-stopped
+    # No host port: nginx is the only path in.
+
+  worker:
+    build: .
+    command: ["python", "-m", "app.worker"]
+    env_file: .env.prod
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      elasticsearch: {condition: service_healthy}
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.27
+    depends_on:
+      - api
+    # No host ports — cloudflared reaches nginx by Docker DNS name ("nginx:80").
+    volumes:
+      - ./deploy/nginx.cloudflared.conf:/etc/nginx/conf.d/default.conf:ro
+    restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    # --no-autoupdate keeps the container image version stable; upgrade by
+    # pulling a new image tag and re-deploying, not by in-place auto-update.
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?get from Cloudflare Zero Trust > Tunnels}
+    depends_on:
+      - nginx
+
+volumes:
+  postgres-data:
+  redis-data:
+  es-data:

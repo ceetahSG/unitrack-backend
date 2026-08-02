@@ -13,6 +13,11 @@ RUN uv pip install --system --no-cache .
 
 COPY . .
 
+# Run as a non-root user. Python packages are installed system-wide and world-
+# readable; the app writes nothing to disk at runtime (DB/Redis/ES for state).
+RUN useradd --no-create-home --shell /bin/false appuser
+USER appuser
+
 EXPOSE 8000
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

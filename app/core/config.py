@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     # Elasticsearch
     elasticsearch_url: str = "http://elasticsearch:9200"
     gps_index: str = "gps_points"
+    # Empty in dev (xpack.security off); set in prod where xpack.security is on.
+    elasticsearch_user: str = ""
+    elasticsearch_password: str = ""
 
     # Auth
     jwt_secret: str = "change-me-in-prod"
