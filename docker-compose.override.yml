@@ -1,0 +1,17 @@
+# Local development conveniences, applied automatically on top of
+# docker-compose.yml. Docker Compose loads this file by name with no extra
+# flags, so `docker compose up` picks it up and the production compose files —
+# which are invoked explicitly with -f — never see it.
+#
+# Why it exists: the dev stack publishes no host ports, which is the right
+# default for anything reachable from outside. But a browser app running on the
+# host (unitrack-web on :3000) has to reach the API somehow, and so does
+# anything hitting /docs.
+#
+# The bind address matters. `127.0.0.1:8000` is not `8000`: the short form
+# listens on 0.0.0.0 and exposes the API to every device on the network,
+# including the coffee-shop wifi. This form is reachable only from this machine.
+services:
+  api:
+    ports:
+      - "127.0.0.1:8000:8000"
