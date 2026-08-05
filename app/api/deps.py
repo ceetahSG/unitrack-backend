@@ -34,6 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.authz import Principal, get_principal_cached
 from app.core.redis import get_redis
+from app.core.revocation import is_revoked
 from app.core.security import decode_token
 from app.db.session import get_db
 from app.models.user import User, UserRole, UserStatus
@@ -50,8 +51,29 @@ _CREDENTIALS_EXC = HTTPException(
 )
 
 
-async def get_principal(
+async def get_access_claims(
     creds: HTTPAuthorizationCredentials = Depends(_bearer),
+    r: Redis = Depends(get_redis),
+) -> dict:
+    """Decode the bearer token and reject it if it has been revoked.
+
+    Split out from `get_principal` so `/auth/logout` can reach the caller's
+    `jti` — you cannot revoke a token you cannot name. FastAPI caches the result
+    per request, so a route depending on both this and `get_principal` still
+    decodes once.
+    """
+    try:
+        claims = decode_token(creds.credentials, expected_type="access")
+    except jwt.InvalidTokenError as exc:
+        raise _CREDENTIALS_EXC from exc
+
+    if await is_revoked(r, claims["jti"]):
+        raise _CREDENTIALS_EXC
+    return claims
+
+
+async def get_principal(
+    claims: dict = Depends(get_access_claims),
     r: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db),
 ) -> Principal:
@@ -62,9 +84,8 @@ async def get_principal(
     point of short-lived credentials.
     """
     try:
-        payload = decode_token(creds.credentials, expected_type="access")
-        user_id = uuid.UUID(payload["sub"])
-    except (jwt.InvalidTokenError, KeyError, ValueError) as exc:
+        user_id = uuid.UUID(claims["sub"])
+    except (KeyError, ValueError) as exc:
         raise _CREDENTIALS_EXC from exc
 
     principal = await get_principal_cached(r, db, user_id)

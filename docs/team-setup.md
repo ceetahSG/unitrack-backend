@@ -190,7 +190,8 @@ Import both files from the `postman/` folder:
 | POST | `/auth/register/student` | None | Requires `@ulab.edu.bd` email |
 | POST | `/auth/register/helper` | None | Account starts as `pending_approval` |
 | POST | `/auth/login` | None | Returns `access_token` + `refresh_token` |
-| POST | `/auth/refresh` | None | Exchange refresh token for a new pair |
+| POST | `/auth/refresh` | None | Exchange refresh token for a new pair. **The token you send is consumed** — store the one that comes back |
+| POST | `/auth/logout` | Bearer | Revokes the access token, and the refresh token if you send one in the body |
 | GET | `/auth/me` | Bearer | Current user profile |
 
 ### Admin (requires admin account)
@@ -235,10 +236,14 @@ Import both files from the `postman/` folder:
 ### Auth flow
 
 ```
-POST /auth/login  →  { access_token, refresh_token }
+POST /auth/login  →  { access_token, refresh_token, expires_in }
 Add: Authorization: Bearer <access_token>  to protected requests
-Access token expires in 15 min — call POST /auth/refresh to renew
+Access token expires in `expires_in` seconds — call POST /auth/refresh to renew
+POST /auth/refresh  →  a new pair; the refresh token you sent is now dead
 ```
+
+Refresh tokens rotate, so a client that keeps reusing its original one gets a
+401 on the second call. Always persist the pair the refresh returns.
 
 A `403` means the token is valid but the role is wrong. A `401` means the token is missing, expired, or malformed.
 

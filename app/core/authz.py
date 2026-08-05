@@ -20,9 +20,16 @@ rather than after a TTL. The TTL is only a backstop for changes made outside the
 API (a manual `UPDATE` in psql, a seed script).
 
 That is the whole trade: revocation stays immediate *because* every mutation
-invalidates, and only because of that. **If you write an endpoint that mutates
-`users` or `helpers` and you do not invalidate, you have created a security
-bug** — a suspended account keeps working for up to `PRINCIPAL_TTL_S`.
+invalidates, and only because of that.
+
+Forgetting to invalidate used to be a security bug you could introduce by
+writing a perfectly ordinary endpoint — a suspended account would keep working
+for up to `PRINCIPAL_TTL_S`. It no longer is. A flush hook at the bottom of this
+file watches every `users` / `helpers` row any session touches and clears their
+cache entries when the request finishes, so the rule is enforced by the ORM
+rather than by remembering. Call `invalidate_principal()` explicitly anyway when
+you mutate one — it lands *before* the response instead of just after it — but
+the net is there when you don't.
 """
 
 from __future__ import annotations
@@ -32,9 +39,11 @@ import uuid
 from dataclasses import asdict, dataclass
 
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
+from app.core.redis import get_redis_client
 from app.models.user import Helper, HelperStatus, User, UserRole, UserStatus
 
 # Backstop only — the correctness mechanism is invalidate_principal(), not this.
@@ -143,3 +152,56 @@ async def invalidate_principal(r: Redis, user_id: uuid.UUID | str) -> None:
         await r.delete(principal_key(user_id))
     except Exception:  # noqa: BLE001
         pass
+
+
+# --- the safety net: invalidation the ORM performs for you -------------------
+#
+# Everything below turns "remember to call invalidate_principal()" into
+# something the framework does. The listener notes which users a session
+# touched; `flush_principal_invalidations()` clears them when the request ends.
+
+_TOUCHED_KEY = "authz_touched_user_ids"
+
+
+def _touched_ids(info: dict) -> set[uuid.UUID]:
+    return info.setdefault(_TOUCHED_KEY, set())
+
+
+@event.listens_for(Session, "after_flush")
+def _record_touched_principals(session: Session, flush_context: object) -> None:
+    """Note every user whose authorization snapshot this flush may have changed.
+
+    Registered on `Session` itself, so it covers every session in the process —
+    request handlers, seed scripts, workers — not just the ones wired through
+    `get_db`. `after_flush` is the right hook because the INSERT/UPDATE/DELETE
+    has run (so primary keys exist) while `session.new`/`dirty`/`deleted` are
+    still populated.
+
+    A `Helper` row is recorded under its `user_id`: the cache is keyed by user,
+    and helper approval is exactly the field that must not go stale.
+    """
+    touched = _touched_ids(session.info)
+    for obj in (*session.new, *session.dirty, *session.deleted):
+        if isinstance(obj, User):
+            touched.add(obj.id)
+        elif isinstance(obj, Helper) and obj.user_id is not None:
+            touched.add(obj.user_id)
+
+
+async def flush_principal_invalidations(session: AsyncSession) -> None:
+    """Drop the cache entries for everyone this session touched.
+
+    Called from `get_db`'s teardown, so it runs once per request no matter how
+    many flushes happened. Draining the set means a long-lived session cannot
+    re-invalidate the same ids forever.
+
+    Failures are swallowed: the request already succeeded and the write is
+    committed, so raising here would report a false error to the client. The
+    `PRINCIPAL_TTL_S` backstop bounds the staleness if a DEL is ever lost.
+    """
+    touched = session.sync_session.info.pop(_TOUCHED_KEY, None)
+    if not touched:
+        return
+    r = get_redis_client()
+    for user_id in touched:
+        await invalidate_principal(r, user_id)

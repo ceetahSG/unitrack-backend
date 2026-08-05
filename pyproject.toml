@@ -29,6 +29,10 @@ dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "httpx>=0.28",
+    # tests/test_bus_api.py runs the API against an in-memory SQLite database
+    # so it needs no Postgres. The async driver was never declared, so those
+    # tests errored on a fresh checkout.
+    "aiosqlite>=0.20",
 ]
 
 [tool.ruff]

@@ -1,9 +1,14 @@
 """Default-deny enforcement: no route ships unguarded by accident.
 
 This walks the real mounted app and asserts every route either resolves
-`get_principal` somewhere in its dependency tree, or is explicitly listed in
+`get_access_claims` somewhere in its dependency tree, or is explicitly listed in
 `PUBLIC_PATHS`. Adding an endpoint and forgetting the guard turns into a failing
 test, not a silent hole in production.
+
+The target is `get_access_claims` rather than `get_principal` because it is the
+narrower of the two: `get_principal` depends on it, so every route that
+authorizes also authenticates, while `/auth/logout` authenticates without
+needing a `Principal` at all. Checking the outer one would miss that route.
 
 Needs no database, no Redis, no network — it inspects the dependency graph
 FastAPI builds at import time, so it runs in milliseconds and can gate CI.
@@ -12,7 +17,7 @@ FastAPI builds at import time, so it runs in milliseconds and can gate CI.
 from fastapi.dependencies.models import Dependant
 from fastapi.routing import APIRoute
 
-from app.api.deps import get_principal
+from app.api.deps import get_access_claims
 from app.api.routes import PUBLIC_PATHS, ROUTERS
 from app.main import create_app
 
@@ -45,7 +50,7 @@ def test_every_route_is_guarded_or_explicitly_public() -> None:
     unguarded = sorted(
         f"{sorted(r.methods)} {r.path}"
         for r in _app_routes()
-        if r.path not in PUBLIC_PATHS and not _resolves(r.dependant, get_principal)
+        if r.path not in PUBLIC_PATHS and not _resolves(r.dependant, get_access_claims)
     )
     assert not unguarded, (
         "These routes are neither authenticated nor listed in PUBLIC_PATHS:\n  "
