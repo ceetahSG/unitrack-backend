@@ -69,8 +69,13 @@ class Helper(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False
     )
+    # SET NULL, not CASCADE: deleting an admin must not delete every helper they
+    # approved. The approval is a fact about the helper; losing the approver
+    # means it was approved by someone no longer on the system, not that it
+    # never happened. Without any ON DELETE the admin's row could never be
+    # deleted at all — see migration e9c3a7b41f26.
     approved_by: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     status: Mapped[HelperStatus] = mapped_column(
         SAEnum(HelperStatus, name="helper_status"), nullable=False, default=HelperStatus.pending

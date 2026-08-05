@@ -139,6 +139,24 @@ Both helpers are pre-approved — `POST /helper/gps` and all helper endpoints wo
 
 ## 7. Reseed manually (optional)
 
+### Full reset — Postgres + Elasticsearch + Redis
+
+When the environment has drifted (leftover smoke-test accounts, stale GPS fixes,
+cached tokens), reset all three stores and reseed in one step:
+
+```bash
+docker compose exec api python -m scripts.reset_dev --yes
+```
+
+This truncates every table, drops and recreates the `gps_points` index, flushes
+Redis, and reseeds. `alembic_version` is left alone, so the schema stays where
+it is — run `alembic upgrade head` separately if migrations are pending.
+
+Refuses to run unless `ENV=dev`, and `--yes` is required. **It destroys all
+local data.**
+
+### Reseed only
+
 The Docker stack auto-seeds on startup. If you need to reseed without restarting Docker:
 
 ```bash

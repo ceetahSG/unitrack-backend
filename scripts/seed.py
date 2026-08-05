@@ -39,7 +39,7 @@ import asyncio
 import sys
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password
@@ -300,24 +300,11 @@ async def _wipe_buses(db: AsyncSession) -> int:
 
 
 async def _wipe_users(db: AsyncSession) -> int:
-    # Deleting a user cascades its Helper and Student rows.
-    #
-    # But `helpers.approved_by` is a plain FK to users.id with no ON DELETE, and
-    # it points at whoever approved that helper — normally this seed admin. Any
-    # helper approved outside the seed set (a smoke-test account, a real one an
-    # admin approved by hand) survives the wipe still holding that reference, so
-    # deleting the admin raises ForeignKeyViolationError and takes the whole
-    # reseed with it. Every database that has ever been used hits this.
-    #
-    # Releasing the reference first is the fix that belongs here. The schema
-    # fix — ON DELETE SET NULL on that column — needs a migration; until then a
-    # wiped admin simply leaves those helpers marked approved by nobody, which
-    # is accurate, since the account that approved them is gone.
-    doomed = select(User.id).where(User.email.in_(_ALL_EMAILS))
-    await db.execute(
-        update(Helper).where(Helper.approved_by.in_(doomed)).values(approved_by=None)
-    )
-
+    # Deleting a user cascades its Helper and Student rows, and any helper this
+    # admin approved has its `approved_by` set to NULL by the database
+    # (migration e9c3a7b41f26). Before that migration this raised
+    # ForeignKeyViolationError on every database where the seed admin had ever
+    # approved anyone, so run `alembic upgrade head` if this fails that way.
     r = await db.execute(delete(User).where(User.email.in_(_ALL_EMAILS)))
     return r.rowcount
 
