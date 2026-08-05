@@ -27,8 +27,8 @@ Accounts seeded
     Role      Email                        Password
     ------    ---------------------------  -----------
     admin     admin@ulab.edu.bd            Admin@1234
-    helper    helper1@unitrack.test        Helper@1234
-    helper    helper2@unitrack.test        Helper@1234
+    helper    helper1@buscrew.com.bd       Helper@1234
+    helper    helper2@buscrew.com.bd       Helper@1234
     student   student1@ulab.edu.bd         Student@1234
     student   student2@ulab.edu.bd         Student@1234
     student   student3@ulab.edu.bd         Student@1234
@@ -70,10 +70,15 @@ from app.models.user import Helper, HelperStatus, Student, User, UserRole, UserS
 
 _ADMIN = {"email": "admin@ulab.edu.bd", "password": "Admin@1234", "name": "Dev Admin"}
 
+# NOT a `.test` domain, however tempting. `LoginRequest.email` is an `EmailStr`,
+# and email-validator rejects RFC 2606 reserved TLDs — so a seeded
+# `@unitrack.test` account gets a 422 from POST /auth/login before the password
+# is ever checked. The row exists and looks fine in psql; it simply cannot sign
+# in. Seeding writes straight to Postgres, which is why nothing here catches it.
 _HELPERS = [
-    {"email": "helper1@unitrack.test", "password": "Helper@1234",
+    {"email": "helper1@buscrew.com.bd", "password": "Helper@1234",
      "name": "Dev Helper 1", "phone": "+8801711111111"},
-    {"email": "helper2@unitrack.test", "password": "Helper@1234",
+    {"email": "helper2@buscrew.com.bd", "password": "Helper@1234",
      "name": "Dev Helper 2", "phone": "+8801722222222"},
 ]
 
@@ -295,7 +300,11 @@ async def _wipe_buses(db: AsyncSession) -> int:
 
 
 async def _wipe_users(db: AsyncSession) -> int:
-    # Deleting a user cascades its Helper and Student rows.
+    # Deleting a user cascades its Helper and Student rows, and any helper this
+    # admin approved has its `approved_by` set to NULL by the database
+    # (migration e9c3a7b41f26). Before that migration this raised
+    # ForeignKeyViolationError on every database where the seed admin had ever
+    # approved anyone, so run `alembic upgrade head` if this fails that way.
     r = await db.execute(delete(User).where(User.email.in_(_ALL_EMAILS)))
     return r.rowcount
 

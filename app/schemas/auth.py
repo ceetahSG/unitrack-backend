@@ -31,10 +31,24 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 
+class LogoutRequest(BaseModel):
+    """The refresh token to kill. The access token comes from the Bearer header.
+
+    Optional because a client that has already lost its refresh token should
+    still be able to end the session it can prove it holds.
+    """
+
+    refresh_token: str | None = None
+
+
 class TokenPair(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
+    # Seconds until `access_token` expires. Present so the response matches the
+    # OAuth 2.0 token-response shape (RFC 6749 §5.1) — clients that already
+    # speak OAuth need no special-casing, and ours stops hardcoding 15 minutes.
+    expires_in: int
 
 
 class UserOut(BaseModel):

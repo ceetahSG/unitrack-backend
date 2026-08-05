@@ -79,6 +79,22 @@ async def run() -> None:
             # An idle stream is normal, and compose sets no restart policy, so a
             # transient read timeout must not be fatal.
             continue
+        except ResponseError as exc:
+            if "NOGROUP" not in str(exc):
+                raise
+            # The stream or its consumer group vanished underneath us: Redis
+            # restarted without persistence, the key was evicted, or a dev reset
+            # flushed the database. Creating the group only at startup meant
+            # this killed the indexer for good, and with no restart policy the
+            # GPS pipeline stayed silently dead until someone noticed
+            # /track/nearby had gone empty.
+            #
+            # Recreating and continuing is safe: the ES document id is the
+            # stream id, so replaying entries re-indexes them in place rather
+            # than duplicating them.
+            logger.warning("consumer group missing (%s) — recreating and resuming", exc)
+            await _ensure_group(r)
+            continue
         if not resp:
             continue
         for _stream, entries in resp:

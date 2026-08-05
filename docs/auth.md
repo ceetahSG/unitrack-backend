@@ -125,19 +125,74 @@ doubt, call it.
 | Pin `algorithms=[ALGORITHM]` | Blocks `alg: none` and HS/RS confusion |
 | Always check the `type` claim | Stops refresh tokens being used as access tokens |
 | Authorize from `Principal`, never the JWT `role` claim | A token minted before a demotion still carries the old role |
-| `invalidate_principal()` after every user/helper write | Revocation depends on it |
+| `invalidate_principal()` after every user/helper write | Revocation depends on it. A flush hook now does this for you as a backstop, but calling it explicitly lands the change *before* the response rather than just after |
 | Same 401 for every auth failure | Distinguishing them tells an attacker which half of the guess was right |
 | `JWT_SECRET` from env, never a literal | A committed default is a permanent backdoor |
+
+## Revocation
+
+Every token carries a `jti`. Revoking one writes `auth:revoked:{jti}` to Redis
+with a TTL equal to the token's remaining life — past `exp` the signature check
+rejects it anyway, so storing it longer only wastes memory. See
+[`app/core/revocation.py`](../app/core/revocation.py).
+
+Three things use it:
+
+| Where | What it does |
+|---|---|
+| `get_access_claims` | Rejects a revoked access token on every request |
+| `POST /auth/refresh` | Revokes the token presented, then issues a new pair |
+| `POST /auth/logout` | Revokes the caller's access **and** refresh token |
+
+**Rotation makes replay detectable.** Because `/auth/refresh` denies the token
+it consumed, presenting the same refresh token twice is never normal traffic —
+it is a stolen token or a broken client. The second attempt gets the same 401 as
+every other refresh failure, and the event is logged.
+
+The failure policy is deliberately asymmetric, and the reasoning is in the
+module docstring: the access-token check fails **open** (it runs on every
+request; a Redis outage must not become an API outage, and the 15-minute TTL
+bounds the exposure), while refresh and logout fail **closed** (rare, and the
+30-day credential is worth more than the availability).
+
+A logout only ends the session it was given. Signing out *every* device needs a
+per-user token epoch — see gap 1 below.
 
 ## Known gaps
 
 Not yet built, in priority order:
 
-1. **Refresh tokens are neither rotated nor revocable.** `POST /auth/refresh`
-   issues a new pair, but the old refresh token stays valid until its 30-day
-   `exp`. A stolen refresh token is 30 days of access, and logout is impossible.
-   Fix: a `jti` claim plus a Redis denylist (`revoked:{jti}`, TTL = remaining
-   `exp`). Redis is already wired.
-2. **No `/auth/logout`** — follows from 1.
-3. **No rate limit on `/auth/login`** — brute force runs at network speed.
-4. No `iss` / `aud` claims. Low priority for a single-audience system.
+1. **No family-wide revocation.** Revocation is per-`jti`, so a detected refresh
+   replay kills the replayed token but not the other tokens issued to that user.
+   Fix: a per-user epoch counter in Redis, bumped on logout-everywhere or on a
+   detected replay, with the epoch carried as a claim. Needs to survive a Redis
+   restart, so it belongs in Postgres with Redis as the cache.
+2. **Rate limiting lives only at nginx**, not in the app — see the table below.
+3. No `iss` / `aud` claims. Low priority for a single-audience system.
+
+## Rate limiting
+
+Enforced at the edge, so it depends on which deployment you run:
+
+| Config | Auth endpoints | Everything else |
+|---|---|---|
+| [`nginx.prod.conf`](../deploy/nginx.prod.conf) | 5 req/min per IP, burst 3 | 120 req/min, burst 30 |
+| [`nginx.cloudflared.conf`](../deploy/nginx.cloudflared.conf) | 5 req/min per IP, burst 3 | 120 req/min, burst 30 |
+| [`nginx.conf`](../deploy/nginx.conf) (dev) | none | none |
+
+Both production configs key the limit on the **real visitor IP**, not on
+`$remote_addr` as Cloudflare presents it — bucketing every user behind a handful
+of edge IPs would throttle innocent traffic while barely slowing an attacker.
+They get there differently, and the difference is the security boundary:
+
+- `nginx.prod.conf` uses `set_real_ip_from` with Cloudflare's published ranges
+  plus `real_ip_header CF-Connecting-IP`. A request from anywhere else keeps its
+  true `$remote_addr` and **cannot spoof the header**. Refresh that range list
+  from <https://www.cloudflare.com/ips/> periodically.
+- `nginx.cloudflared.conf` trusts `CF-Connecting-IP` unconditionally, which is
+  safe **only** because the tunnel container is the sole route to nginx and the
+  compose file publishes no host ports. Publish one and the limiter is bypassable.
+
+Since the limit is at the edge, anything that reaches the API directly is
+unlimited. Today nothing can — neither production compose publishes `api:8000`.
+That is an invariant worth keeping, not an accident.
