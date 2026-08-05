@@ -27,8 +27,8 @@ Accounts seeded
     Role      Email                        Password
     ------    ---------------------------  -----------
     admin     admin@ulab.edu.bd            Admin@1234
-    helper    helper1@unitrack.test        Helper@1234
-    helper    helper2@unitrack.test        Helper@1234
+    helper    helper1@buscrew.com.bd       Helper@1234
+    helper    helper2@buscrew.com.bd       Helper@1234
     student   student1@ulab.edu.bd         Student@1234
     student   student2@ulab.edu.bd         Student@1234
     student   student3@ulab.edu.bd         Student@1234
@@ -39,7 +39,7 @@ import asyncio
 import sys
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password
@@ -70,10 +70,15 @@ from app.models.user import Helper, HelperStatus, Student, User, UserRole, UserS
 
 _ADMIN = {"email": "admin@ulab.edu.bd", "password": "Admin@1234", "name": "Dev Admin"}
 
+# NOT a `.test` domain, however tempting. `LoginRequest.email` is an `EmailStr`,
+# and email-validator rejects RFC 2606 reserved TLDs — so a seeded
+# `@unitrack.test` account gets a 422 from POST /auth/login before the password
+# is ever checked. The row exists and looks fine in psql; it simply cannot sign
+# in. Seeding writes straight to Postgres, which is why nothing here catches it.
 _HELPERS = [
-    {"email": "helper1@unitrack.test", "password": "Helper@1234",
+    {"email": "helper1@buscrew.com.bd", "password": "Helper@1234",
      "name": "Dev Helper 1", "phone": "+8801711111111"},
-    {"email": "helper2@unitrack.test", "password": "Helper@1234",
+    {"email": "helper2@buscrew.com.bd", "password": "Helper@1234",
      "name": "Dev Helper 2", "phone": "+8801722222222"},
 ]
 
@@ -296,6 +301,23 @@ async def _wipe_buses(db: AsyncSession) -> int:
 
 async def _wipe_users(db: AsyncSession) -> int:
     # Deleting a user cascades its Helper and Student rows.
+    #
+    # But `helpers.approved_by` is a plain FK to users.id with no ON DELETE, and
+    # it points at whoever approved that helper — normally this seed admin. Any
+    # helper approved outside the seed set (a smoke-test account, a real one an
+    # admin approved by hand) survives the wipe still holding that reference, so
+    # deleting the admin raises ForeignKeyViolationError and takes the whole
+    # reseed with it. Every database that has ever been used hits this.
+    #
+    # Releasing the reference first is the fix that belongs here. The schema
+    # fix — ON DELETE SET NULL on that column — needs a migration; until then a
+    # wiped admin simply leaves those helpers marked approved by nobody, which
+    # is accurate, since the account that approved them is gone.
+    doomed = select(User.id).where(User.email.in_(_ALL_EMAILS))
+    await db.execute(
+        update(Helper).where(Helper.approved_by.in_(doomed)).values(approved_by=None)
+    )
+
     r = await db.execute(delete(User).where(User.email.in_(_ALL_EMAILS)))
     return r.rowcount
 

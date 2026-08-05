@@ -37,6 +37,13 @@ class Settings(BaseSettings):
     # Identity — varsity domain allow-list for student signup
     allowed_student_email_domains: str = "ulab.edu.bd"
 
+    # Browser origins allowed to call this API, comma-separated. Empty means no
+    # CORS headers at all, which is the correct default for a server whose only
+    # clients are the Flutter app and curl — a browser blocks cross-origin reads
+    # unless the server opts in, so shipping nothing is shipping the safe thing.
+    # Set it when unitrack-web exists; there is deliberately no wildcard.
+    cors_origins: str = ""
+
     # Operations
     # The fleet's local timezone. Storage is UTC throughout; this is only used
     # to decide which *service day* a trip belongs to. Deriving that from UTC
@@ -55,6 +62,17 @@ class Settings(BaseSettings):
     def student_email_domains(self) -> set[str]:
         raw = self.allowed_student_email_domains.split(",")
         return {d.strip().lower() for d in raw if d.strip()}
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        """Parsed `cors_origins`. A `*` entry is dropped, not honoured.
+
+        Wildcard CORS on an authenticated API means any page on the internet can
+        script requests carrying the visitor's bearer token. It is never what
+        this service wants, so it cannot be switched on by a typo in an env var.
+        """
+        raw = self.cors_origins.split(",")
+        return [o.strip() for o in raw if o.strip() and o.strip() != "*"]
 
 
 @lru_cache

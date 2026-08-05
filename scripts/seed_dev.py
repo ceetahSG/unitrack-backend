@@ -22,7 +22,10 @@ from app.db.session import SessionLocal
 from app.models.fleet import Bus, BusStatus
 from app.models.user import Helper, HelperStatus, User, UserRole, UserStatus
 
-HELPER_EMAIL = "helper@unitrack.test"
+# A `.test` domain here would seed an account that cannot log in: `EmailStr`
+# rejects RFC 2606 reserved TLDs, so /auth/login answers 422 before checking the
+# password. See the same note in scripts/seed.py.
+HELPER_EMAIL = "helper@buscrew.com.bd"
 HELPER_PASSWORD = "helper-dev-password"
 BUS_REG_NO = "DHK-METRO-GA-11-1234"
 

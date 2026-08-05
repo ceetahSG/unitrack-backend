@@ -127,8 +127,8 @@ uv run python -m app.worker
 | Role | Email | Password |
 |---|---|---|
 | Admin | `admin@ulab.edu.bd` | `Admin@1234` |
-| Helper | `helper1@unitrack.test` | `Helper@1234` |
-| Helper | `helper2@unitrack.test` | `Helper@1234` |
+| Helper | `helper1@buscrew.com.bd` | `Helper@1234` |
+| Helper | `helper2@buscrew.com.bd` | `Helper@1234` |
 | Student | `student1@ulab.edu.bd` | `Student@1234` |
 | Student | `student2@ulab.edu.bd` | `Student@1234` |
 | Student | `student3@ulab.edu.bd` | `Student@1234` |
