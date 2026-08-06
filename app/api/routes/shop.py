@@ -20,9 +20,7 @@ student is read from the order row we created earlier, never from the callback.
 """
 
 import logging
-import secrets
 import uuid
-from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
@@ -33,17 +31,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import require_authenticated, require_student
 from app.core.authz import Principal
 from app.core.config import settings
-from app.core.sslcommerz import (
-    GatewayError,
-    SslCommerzClient,
-    amount_matches,
-    payment_succeeded,
-    risk_flagged,
-)
+from app.core.sslcommerz import GatewayError, SslCommerzClient
 from app.db.session import get_db
-from app.models.commerce import Order, OrderStatus, Ticket, TicketProduct, TicketStatus
+from app.models.commerce import Order, OrderStatus, Ticket, TicketProduct
 from app.models.user import Student, User
 from app.schemas.commerce import CheckoutOut, OrderCreate, OrderOut, ProductOut, TicketOut
+from app.services.settlement import AMOUNT_MISMATCH, PAID, apply_validation
 
 logger = logging.getLogger("unitrack.shop")
 
@@ -265,42 +258,55 @@ async def _settle(db: AsyncSession, fields: dict) -> tuple[Order, str]:
             status.HTTP_502_BAD_GATEWAY, "Could not confirm payment, check your wallet later"
         ) from exc
 
-    order.raw_payload = validation
-    order.gateway_val_id = val_id
-    order.gateway_bank_tran_id = validation.get("bank_tran_id")
-    order.gateway_card_type = validation.get("card_type")
+    outcome = await apply_validation(db, order, validation)
 
-    if not payment_succeeded(validation):
-        order.status = OrderStatus.failed
-        await db.commit()
-        return order, "failed"
-
-    # A VALID status for the wrong amount is a successful attack if only the
-    # status is checked, so the figures are compared before anything is issued.
-    if not amount_matches(validation, order.amount_paisa, order.currency):
-        logger.error(
-            "amount mismatch on order %s: expected %s %s, gateway settled %s %s",
-            order.id,
-            order.amount_paisa,
-            order.currency,
-            validation.get("currency_amount"),
-            validation.get("currency_type"),
-        )
-        order.status = OrderStatus.failed
+    if outcome == AMOUNT_MISMATCH:
         await db.commit()
         raise SettlementError(status.HTTP_400_BAD_REQUEST, "Payment amount mismatch")
 
-    if risk_flagged(validation):
-        # SSLCommerz wants this reviewed. Hold it rather than hand over a ticket
-        # that may be charged back.
-        logger.warning("order %s flagged for risk review", order.id)
-        order.status = OrderStatus.pending
+    try:
         await db.commit()
-        return order, "under_review"
+    except IntegrityError:
+        # The unique on tickets.order_id fired: another report of this payment
+        # already issued. That is success, not failure.
+        await db.rollback()
+        logger.info("ticket for order %s was already issued concurrently", order.id)
+        return order, PAID
 
-    order.status = OrderStatus.paid
-    order.paid_at = datetime.now(UTC)
-    await _issue_ticket(db, order)
+    return order, outcome
+
+    gateway_status = str(fields.get("status") or "").upper()
+    if gateway_status in {"FAILED", "CANCELLED"}:
+        order.status = (
+            OrderStatus.cancelled if gateway_status == "CANCELLED" else OrderStatus.failed
+        )
+        await db.commit()
+        return order, order.status.value
+
+    val_id = str(fields.get("val_id") or "")
+    if not val_id:
+        raise SettlementError(status.HTTP_400_BAD_REQUEST, "Missing val_id")
+
+    try:
+        validation = await _gateway.validate(val_id)
+    except GatewayError as exc:
+        # Leave the order pending rather than failing it: the money may well
+        # have moved, and the reconciler needs to see it as unsettled.
+        logger.error("validation unreachable for order %s: %s", order.id, exc)
+        raise SettlementError(
+            status.HTTP_502_BAD_GATEWAY, "Could not confirm payment, check your wallet later"
+        ) from exc
+
+    # The decision itself lives in app/services/settlement.py, shared with the
+    # reconciler: three callers learn about a payment by different routes and
+    # must not reach different conclusions about the same money.
+    validation.setdefault("val_id", val_id)
+    outcome = await apply_validation(db, order, validation)
+
+    if outcome == AMOUNT_MISMATCH:
+        await db.commit()
+        raise SettlementError(status.HTTP_400_BAD_REQUEST, "Payment amount mismatch")
+
     try:
         await db.commit()
     except IntegrityError:
@@ -308,7 +314,9 @@ async def _settle(db: AsyncSession, fields: dict) -> tuple[Order, str]:
         # raced and the other one already issued. That is success, not failure.
         await db.rollback()
         logger.info("ticket for order %s was already issued concurrently", order.id)
-    return order, "paid"
+        return order, PAID
+
+    return order, outcome
 
 
 @router.api_route("/payments/return", methods=["GET", "POST"])
@@ -349,34 +357,6 @@ async def payment_ipn(request: Request, db: AsyncSession = Depends(get_db)):
         logger.warning("ipn rejected: %s", exc.detail)
         return {"received": True, "outcome": "rejected"}
     return {"received": True, "outcome": outcome}
-
-
-async def _issue_ticket(db: AsyncSession, order: Order) -> None:
-    """Create the ticket for a paid order. At most one, ever.
-
-    `tickets.order_id` is unique, so a replayed callback that slipped past the
-    status check still cannot mint a second ticket — the database refuses it.
-    """
-    product = await db.get(TicketProduct, order.product_id)
-    if product is None:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Order references a missing product")
-
-    now = datetime.now(UTC)
-    db.add(
-        Ticket(
-            order_id=order.id,
-            student_id=order.student_id,
-            product_id=product.id,
-            rides_total=product.ride_count,
-            rides_remaining=product.ride_count,
-            valid_from=now,
-            valid_to=now + timedelta(days=product.validity_days),
-            # Per-ticket HMAC key for the rotating boarding QR (spec §7.2).
-            # Generated now so the column is never null on a live ticket.
-            qr_secret=secrets.token_hex(32),
-            status=TicketStatus.active,
-        )
-    )
 
 
 def _finish(order: Order, outcome: str):

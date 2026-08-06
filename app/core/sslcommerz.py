@@ -124,6 +124,39 @@ class SslCommerzClient:
 
         return str(body["GatewayPageURL"])
 
+    async def query_by_tran_id(self, tran_id: str) -> list[dict[str, Any]]:
+        """Ask what became of one of our transaction ids.
+
+        The reconciler's only source of truth. `validate()` needs a `val_id`,
+        which only exists once someone told us about the payment — precisely
+        what has *not* happened for an order the browser and the IPN both
+        missed. This asks using the reference we generated ourselves, so it
+        works with nothing but our own records.
+
+        Returns the `element` list verbatim, which is empty when the gateway has
+        never heard of the transaction. A transaction can legitimately have more
+        than one element (a retry after a failed attempt), so the caller decides
+        which one counts rather than this picking for it.
+        """
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                response = await client.get(
+                    f"{_base_url()}/validator/api/merchantTransIDvalidationAPI.php",
+                    params={
+                        "tran_id": tran_id,
+                        "store_id": settings.sslcommerz_store_id,
+                        "store_passwd": settings.sslcommerz_store_password,
+                        "format": "json",
+                    },
+                )
+                response.raise_for_status()
+                body = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            raise GatewayError(f"transaction query failed: {exc}") from exc
+
+        elements = body.get("element")
+        return list(elements) if isinstance(elements, list) else []
+
     async def validate(self, val_id: str) -> dict[str, Any]:
         """Ask SSLCommerz what really happened. This is the source of truth.
 
@@ -154,17 +187,30 @@ def payment_succeeded(validation: dict[str, Any]) -> bool:
 def amount_matches(validation: dict[str, Any], expected_paisa: int, expected_currency: str) -> bool:
     """Confirm the gateway settled the amount we actually asked for.
 
-    Compared in paisa after rounding, because the response carries a decimal
-    string and float equality on money is never reliable. `currency_amount` is
-    the figure in the store's own currency, which is the one our order is in.
+    Two response shapes carry this, and they disagree about which fields are
+    populated. The validation API fills `currency_amount` / `currency_type`;
+    the transaction-query API leaves both **empty** and puts the figure in
+    `amount` / `currency` instead. Reading only the first pair meant a genuine
+    payment looked like an amount mismatch when the reconciler examined it —
+    observed on a real sandbox bKash payment.
+
+    Never `store_amount`: that is the merchant's take after the gateway's
+    commission (29.25 on a 30.00 sale), so comparing it to the order would
+    reject every real payment.
+
+    Compared in integer paisa after rounding, because the response carries a
+    decimal string and float equality on money is never reliable.
     """
+    raw_amount = validation.get("currency_amount") or validation.get("amount")
+    raw_currency = validation.get("currency_type") or validation.get("currency")
+
     try:
-        settled_paisa = round(float(validation["currency_amount"]) * 100)
-    except (KeyError, TypeError, ValueError):
+        settled_paisa = round(float(raw_amount) * 100)
+    except (TypeError, ValueError):
         return False
 
-    currency = str(validation.get("currency_type") or validation.get("currency") or "").upper()
-    return settled_paisa == expected_paisa and currency == expected_currency.upper()
+    currency_ok = str(raw_currency or "").upper() == expected_currency.upper()
+    return settled_paisa == expected_paisa and currency_ok
 
 
 def risk_flagged(validation: dict[str, Any]) -> bool:
