@@ -15,7 +15,16 @@ is a build failure rather than a code-review hope.
 
 from fastapi import APIRouter
 
-from app.api.routes import admin, auth, boarding, fleet, helper, shop, tracking
+from app.api.routes import (
+    admin,
+    auth,
+    boarding,
+    fleet,
+    helper,
+    shop,
+    tracking,
+    wallet_page,
+)
 
 # Every router in the API. `api_router` is built from this tuple rather than
 # from a list of include_router() calls, so the auth-coverage test and the
@@ -28,6 +37,7 @@ ROUTERS: tuple[APIRouter, ...] = (
     tracking.router,
     shop.router,
     boarding.router,
+    wallet_page.router,
 )
 
 api_router = APIRouter()
@@ -54,6 +64,9 @@ PUBLIC_PATHS: frozenset[str] = frozenset(
         # authenticate at all. Same defence as the return: the request is a
         # lookup key, and the payment is confirmed by calling the gateway back.
         "/shop/payments/ipn",
+        # The student wallet page. Public like any single-page app: it ships no
+        # data, and authenticates from inside against /auth/login.
+        "/wallet",
         # FastAPI's own docs endpoints.
         "/docs",
         "/docs/oauth2-redirect",
