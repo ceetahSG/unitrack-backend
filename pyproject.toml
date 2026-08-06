@@ -21,6 +21,13 @@ dependencies = [
     # settings.service_timezone raises ZoneInfoNotFoundError and every trip
     # start fails. Explicit dependency rather than a base-image assumption.
     "tzdata>=2024.1",
+    # Server-to-server calls to SSLCommerz. A runtime dependency, not a test
+    # one: app/core/sslcommerz.py imports it, so the API will not start without.
+    "httpx>=0.28",
+    # Starlette needs this to read a form body. The payment gateway returns the
+    # student by POSTing form-encoded fields, so without it every settlement
+    # raises "The `python-multipart` library must be installed".
+    "python-multipart>=0.0.20",
 ]
 
 [dependency-groups]
