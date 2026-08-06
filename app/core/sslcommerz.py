@@ -124,6 +124,39 @@ class SslCommerzClient:
 
         return str(body["GatewayPageURL"])
 
+    async def query_by_tran_id(self, tran_id: str) -> list[dict[str, Any]]:
+        """Ask what became of one of our transaction ids.
+
+        The reconciler's only source of truth. `validate()` needs a `val_id`,
+        which only exists once someone told us about the payment — precisely
+        what has *not* happened for an order the browser and the IPN both
+        missed. This asks using the reference we generated ourselves, so it
+        works with nothing but our own records.
+
+        Returns the `element` list verbatim, which is empty when the gateway has
+        never heard of the transaction. A transaction can legitimately have more
+        than one element (a retry after a failed attempt), so the caller decides
+        which one counts rather than this picking for it.
+        """
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                response = await client.get(
+                    f"{_base_url()}/validator/api/merchantTransIDvalidationAPI.php",
+                    params={
+                        "tran_id": tran_id,
+                        "store_id": settings.sslcommerz_store_id,
+                        "store_passwd": settings.sslcommerz_store_password,
+                        "format": "json",
+                    },
+                )
+                response.raise_for_status()
+                body = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            raise GatewayError(f"transaction query failed: {exc}") from exc
+
+        elements = body.get("element")
+        return list(elements) if isinstance(elements, list) else []
+
     async def validate(self, val_id: str) -> dict[str, Any]:
         """Ask SSLCommerz what really happened. This is the source of truth.
 
