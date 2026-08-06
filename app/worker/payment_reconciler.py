@@ -66,10 +66,15 @@ def _successful_element(elements: list[dict]) -> dict | None:
     """The element that represents money actually taken.
 
     A transaction can carry several attempts — a failed card followed by a
-    successful wallet. Only a successful one settles the order, and picking the
-    first element blindly would let a failed attempt look authoritative.
+    successful wallet — and a real response contains exactly that. Only a
+    successful one settles the order, and picking the first element blindly
+    would let a failed attempt look authoritative.
+
+    A success is only usable if it carries a `val_id`, because that is the
+    handle for the validation call that follows. Observed responses put an empty
+    `val_id` on the failed element and a real one on the success.
     """
-    return next((e for e in elements if payment_succeeded(e)), None)
+    return next((e for e in elements if payment_succeeded(e) and e.get("val_id")), None)
 
 
 async def reconcile_once(gateway: SslCommerzClient) -> dict[str, int]:
@@ -106,6 +111,12 @@ async def reconcile_once(gateway: SslCommerzClient) -> dict[str, int]:
                     tally["still_open"] += 1
                 continue
 
+            # Settled straight from the query element rather than re-fetching
+            # through the validation API. The query is the same authenticated
+            # server-to-server call and carries the whole record, while
+            # validationserverAPI answers 500 for an already-validated val_id —
+            # observed on a real sandbox payment, which would have left a paid
+            # order stuck open forever.
             outcome = await apply_validation(db, order, paid)
             if outcome == PAID:
                 tally["settled"] += 1
