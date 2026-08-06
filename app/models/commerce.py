@@ -25,7 +25,7 @@ import datetime
 import enum
 import uuid
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -61,6 +61,21 @@ class TicketStatus(enum.StrEnum):
     exhausted = "exhausted"
     expired = "expired"
     revoked = "revoked"
+
+
+class RedemptionFlag(enum.StrEnum):
+    """How much a recorded boarding should be trusted.
+
+    `ok` is the ordinary case. `duplicate_suspect` is what offline validation
+    inevitably produces: two helper devices, neither able to see the other's
+    nonce log, both accept the same QR. Cryptography cannot prevent that — only
+    detection after the fact can, which is why the flag exists rather than a
+    hard rejection that would break offline boarding entirely.
+    """
+
+    ok = "ok"
+    duplicate_suspect = "duplicate_suspect"
+    invalid = "invalid"
 
 
 class TicketProduct(Base):
@@ -148,10 +163,19 @@ class Ticket(Base):
     One per paid order, enforced by the unique constraint on `order_id`: a
     replayed callback must not mint a second ticket for one payment.
 
-    `qr_secret` is the per-ticket HMAC key for the rotating boarding QR
-    (spec §7.2). It is generated here so the column exists from the start, but
-    nothing reads it until the boarding flow is built — issuing tickets without
-    it would mean a migration over live rows later.
+    Each ticket carries its own **Ed25519 keypair** for the rotating boarding
+    QR (spec §7.2). The student's device signs with the private key; the helper
+    verifies with the public key, which is all their offline manifest carries.
+
+    This is why it is a keypair and not the HMAC secret the spec's formula
+    literally describes: verifying an HMAC needs the same key that signs it, so
+    every helper phone would have to hold every active ticket's secret, and one
+    stolen helper phone could forge a QR for the entire fleet. §7.2 calls the
+    synced material "public verification material", which only makes sense
+    asymmetrically. A stolen manifest is now worth nothing.
+
+    The private key is stored so a student signing in on a new device can
+    re-sync it. Losing it would strand a paid ticket on a cleared cache.
     """
 
     __tablename__ = "tickets"
@@ -177,8 +201,69 @@ class Ticket(Base):
     valid_from: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     valid_to: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    qr_secret: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Raw 32-byte Ed25519 keys, base64url encoded. Raw rather than PEM so the
+    # QR payload and the mobile clients stay small and format-agnostic.
+    qr_private_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    qr_public_key: Mapped[str] = mapped_column(String(64), nullable=False)
 
     status: Mapped[TicketStatus] = mapped_column(
         SAEnum(TicketStatus, name="ticket_status"), nullable=False, default=TicketStatus.active
+    )
+
+
+class Redemption(Base):
+    """One boarding recorded against a ticket (spec §6, §7.2).
+
+    Written when a helper's device syncs, which may be long after the boarding
+    happened — a bus can finish a route with no signal. So `redeemed_at` is the
+    **device's** clock at the moment of scanning and `synced_at` is when the
+    server heard about it; conflating them would make every offline trip look
+    like it happened at the depot.
+
+    The nonce is unique **per device**, which is the strongest guarantee a
+    device can offer alone: its own SQLite log stops the same QR being scanned
+    twice on that phone. Two different phones cannot see each other's logs
+    while offline, so global uniqueness is deliberately *not* a constraint here
+    — it is detected afterwards by the fraud sweep and recorded as
+    `duplicate_suspect`. A unique index would instead reject the sync outright
+    and lose the evidence.
+    """
+
+    __tablename__ = "redemptions"
+    __table_args__ = (
+        # The fraud sweep's query: the same nonce seen on more than one device.
+        Index("ix_redemptions_nonce", "nonce"),
+        # A device re-syncing a batch must not double-record its own scans.
+        UniqueConstraint("helper_device_id", "nonce", name="uq_redemptions_device_nonce"),
+        Index("ix_redemptions_ticket", "ticket_id", "redeemed_at"),
+    )
+
+    ticket_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tickets.id", ondelete="RESTRICT"), nullable=False
+    )
+    # Null when the helper had no live trip — the boarding still happened and
+    # the ride still counts, so refusing it would punish the passenger for the
+    # helper forgetting to press Start.
+    trip_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("trips.id", ondelete="SET NULL"), nullable=True
+    )
+    helper_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("helpers.id", ondelete="RESTRICT"), nullable=False
+    )
+    helper_device_id: Mapped[str] = mapped_column(String(128), nullable=False)
+
+    nonce: Mapped[str] = mapped_column(String(64), nullable=False)
+    passenger_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+    redeemed_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    synced_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+    flag: Mapped[RedemptionFlag] = mapped_column(
+        SAEnum(RedemptionFlag, name="redemption_flag"),
+        nullable=False,
+        default=RedemptionFlag.ok,
     )

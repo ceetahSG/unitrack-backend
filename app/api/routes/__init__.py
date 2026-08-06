@@ -15,7 +15,7 @@ is a build failure rather than a code-review hope.
 
 from fastapi import APIRouter
 
-from app.api.routes import admin, auth, fleet, helper, shop, tracking
+from app.api.routes import admin, auth, boarding, fleet, helper, shop, tracking
 
 # Every router in the API. `api_router` is built from this tuple rather than
 # from a list of include_router() calls, so the auth-coverage test and the
@@ -27,6 +27,7 @@ ROUTERS: tuple[APIRouter, ...] = (
     helper.router,
     tracking.router,
     shop.router,
+    boarding.router,
 )
 
 api_router = APIRouter()

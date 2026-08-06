@@ -24,6 +24,10 @@ dependencies = [
     # Server-to-server calls to SSLCommerz. A runtime dependency, not a test
     # one: app/core/sslcommerz.py imports it, so the API will not start without.
     "httpx>=0.28",
+    # Ed25519 for boarding QR signatures (spec §7.2). Each ticket gets a
+    # keypair: the student's device signs, the helper verifies with the public
+    # key from its manifest — so a stolen helper phone holds nothing forgeable.
+    "cryptography>=44.0",
     # Starlette needs this to read a form body. The payment gateway returns the
     # student by POSTing form-encoded fields, so without it every settlement
     # raises "The `python-multipart` library must be installed".

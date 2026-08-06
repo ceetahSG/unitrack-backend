@@ -3,7 +3,7 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.commerce import OrderStatus, ProductType, TicketStatus
+from app.models.commerce import OrderStatus, ProductType, RedemptionFlag, TicketStatus
 
 
 class ProductOut(BaseModel):
@@ -68,3 +68,85 @@ class TicketOut(BaseModel):
     valid_from: datetime.datetime
     valid_to: datetime.datetime
     status: TicketStatus
+
+
+class QrMaterialOut(BaseModel):
+    """Everything a student's device needs to render boarding codes offline.
+
+    The private key leaves the server exactly once per sync, over an
+    authenticated request, to the account that owns the ticket. That is the
+    accepted trade in spec §7.5: a code that works with no signal has to be
+    generated on the device, and generating it requires the key.
+
+    `server_time` is the clock-offset anchor. A phone whose clock is wrong
+    would otherwise sign codes in the wrong time slice and be rejected at the
+    door with nothing to explain why.
+    """
+
+    ticket_id: uuid.UUID
+    qr_private_key: str
+    slice_seconds: int
+    server_time: datetime.datetime
+    passenger_count: int
+    valid_to: datetime.datetime
+
+
+class ManifestTicketOut(BaseModel):
+    """One row of the helper's offline ticket manifest (spec §7.5).
+
+    Carries the **public** key only. A lost or stolen helper phone therefore
+    leaks nothing that can forge a boarding code — it can verify codes, not
+    create them.
+
+    `rides_remaining` is a snapshot for display and for the dead-phone manual
+    fallback. The server value is authoritative; this one is as fresh as the
+    helper's last sync.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    ticket_id: uuid.UUID
+    qr_public_key: str
+    student_name: str
+    student_id_no: str
+    rides_remaining: int | None
+    valid_to: datetime.datetime
+    status: TicketStatus
+
+
+class RedemptionIn(BaseModel):
+    """One boarding a helper's device recorded, online or hours earlier."""
+
+    code: str = Field(min_length=8, max_length=512)
+    device_id: str = Field(min_length=1, max_length=128)
+    # The device's own clock at the scan. Not trusted for validity — the time
+    # slice inside the signed code decides that — but recorded so an offline
+    # trip does not appear to have happened at sync time.
+    redeemed_at: datetime.datetime
+    trip_id: uuid.UUID | None = None
+
+
+class RedemptionBatchIn(BaseModel):
+    # Batched because a helper coming back into signal may have a route's worth
+    # queued. Capped so one sync cannot monopolise a worker.
+    redemptions: list[RedemptionIn] = Field(min_length=1, max_length=100)
+
+
+class RedemptionResultOut(BaseModel):
+    """What happened to one submitted boarding.
+
+    `accepted` tells the device whether to drop the row from its queue.
+    A rejected code is dropped too — retrying a forged or expired code forever
+    would be a queue that never drains.
+    """
+
+    nonce: str | None
+    accepted: bool
+    reason: str
+    ticket_id: uuid.UUID | None = None
+    rides_remaining: int | None = None
+    flag: RedemptionFlag | None = None
+
+
+class RedemptionBatchOut(BaseModel):
+    results: list[RedemptionResultOut]
