@@ -251,6 +251,29 @@ Import both files from the `postman/` folder:
 |---|---|---|
 | GET | `/track/nearby` | `?lat=&lng=&radius_km=` — buses near a location |
 
+### Shop (student accounts)
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/shop/products` | Ticket catalogue. Any signed-in account |
+| POST | `/shop/orders` | `{product_id, idempotency_key}` → checkout URL. Retrying the same key returns the original order, never a second charge |
+| GET | `/shop/orders` | The caller's own orders |
+| GET | `/shop/tickets` | The caller's wallet |
+| POST | `/shop/payments/return` | Gateway redirect target. Unauthenticated — see below |
+| POST | `/shop/payments/ipn` | Gateway server-to-server report. Unauthenticated — see below |
+
+Set `SSLCOMMERZ_STORE_ID` and `SSLCOMMERZ_STORE_PASSWORD` in `.env` before
+buying anything, or order creation answers **502**. For a sandbox store the API
+password is normally `<store_id>@ssl` — **not** the password shown in the
+merchant panel's store detail. A wrong one fails with
+`Store Credential Error Or Store is De-active`.
+
+The two payment endpoints are unauthenticated because they must be: the gateway
+carries no credential of ours. Nothing in those requests is trusted beyond
+`tran_id` as a lookup key — the payment is confirmed by calling SSLCommerz back
+and comparing the settled amount and currency with the order. On localhost no
+`ipn_url` is registered, so settlement happens only when the browser returns.
+
 ### Auth flow
 
 ```
