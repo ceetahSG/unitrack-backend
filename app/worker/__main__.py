@@ -5,7 +5,8 @@ Jobs:
                       (ES is the sole GPS store; Postgres holds no GPS.)
   2. Payment reconciler — settle orders no report ever arrived for     [wired]
   3. ETA engine    — Mapbox Directions per live trip every 2-3 min   [later]
-  4. Fraud sweep + auto-alerts + report aggregation                  [later]
+  4. Fraud sweep — suspend tickets whose code was reused offline      [wired]
+  5. Report aggregation                                              [later]
 
 Jobs run concurrently in one process and must not take each other down, so each
 owns its own error handling. `asyncio.gather` would cancel the siblings of any
@@ -16,6 +17,7 @@ GPS indexing.
 import asyncio
 import logging
 
+from app.worker.fraud_sweep import run as run_fraud_sweep
 from app.worker.gps_es_indexer import run as run_gps_es_indexer
 from app.worker.payment_reconciler import run as run_payment_reconciler
 
@@ -28,6 +30,7 @@ async def main() -> None:
     await asyncio.gather(
         run_gps_es_indexer(),
         run_payment_reconciler(),
+        run_fraud_sweep(),
     )
 
 

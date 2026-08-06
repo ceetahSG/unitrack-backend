@@ -60,6 +60,11 @@ class TicketStatus(enum.StrEnum):
     active = "active"
     exhausted = "exhausted"
     expired = "expired"
+    # Held pending review, not destroyed. The fraud sweep sets this when one
+    # code is accepted on several devices — which is suspicious but not proof,
+    # since a helper can also scan the same screen twice. Revoking would throw
+    # away a paid ticket on a suspicion; an admin can restore this one.
+    suspended = "suspended"
     revoked = "revoked"
 
 
