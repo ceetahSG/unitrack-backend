@@ -319,19 +319,33 @@ async def _settle(db: AsyncSession, fields: dict) -> tuple[Order, str]:
     return order, outcome
 
 
-@router.api_route("/payments/return", methods=["GET", "POST"])
-async def payment_return(request: Request, db: AsyncSession = Depends(get_db)):
+async def _handle_return(db: AsyncSession, fields: dict):
     """Where the gateway sends the student's browser, whatever the outcome.
 
     Unauthenticated by necessity and safe by construction — see the module
     docstring. This is the fast path; the IPN below is the reliable one.
     """
-    fields = dict(await request.form()) if request.method == "POST" else dict(request.query_params)
     try:
         order, outcome = await _settle(db, fields)
     except SettlementError as exc:
         raise HTTPException(exc.status_code, exc.detail) from exc
     return _finish(order, outcome)
+
+
+# Split by method rather than one `api_route` carrying both. FastAPI derives an
+# operation id per method from the function name, so a single handler for two
+# methods emits duplicates — which makes the generated TypeScript client in
+# unitrack-web collide on one of them.
+@router.post("/payments/return", operation_id="payment_return_post")
+async def payment_return_post(request: Request, db: AsyncSession = Depends(get_db)):
+    """The normal case: SSLCommerz returns the student with a form POST."""
+    return await _handle_return(db, dict(await request.form()))
+
+
+@router.get("/payments/return", operation_id="payment_return_get")
+async def payment_return_get(request: Request, db: AsyncSession = Depends(get_db)):
+    """Some gateway configurations redirect with a GET and query parameters."""
+    return await _handle_return(db, dict(request.query_params))
 
 
 @router.post("/payments/ipn")
