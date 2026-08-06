@@ -49,6 +49,10 @@ PUBLIC_PATHS: frozenset[str] = frozenset(
         # payment is confirmed by a server-to-server validation call before
         # any ticket is issued. See app/api/routes/shop.py.
         "/shop/payments/return",
+        # SSLCommerz posts here server-to-server, so there is no session to
+        # authenticate at all. Same defence as the return: the request is a
+        # lookup key, and the payment is confirmed by calling the gateway back.
+        "/shop/payments/ipn",
         # FastAPI's own docs endpoints.
         "/docs",
         "/docs/oauth2-redirect",

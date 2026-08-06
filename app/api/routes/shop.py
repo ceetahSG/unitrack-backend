@@ -75,6 +75,19 @@ def _return_urls() -> dict[str, str]:
     }
 
 
+def _ipn_url() -> str | None:
+    """Where SSLCommerz should report the outcome independently of the browser.
+
+    Only sent when the configured origin is publicly resolvable. Registering a
+    localhost IPN would have the gateway retry a URL it can never reach, and
+    every order would look unsettled to whoever reads those logs.
+    """
+    base = settings.public_base_url.rstrip("/")
+    if "localhost" in base or "127.0.0.1" in base:
+        return None
+    return f"{base}/shop/payments/ipn"
+
+
 # ---------------------------------------------------------------------------
 # Catalogue
 # ---------------------------------------------------------------------------
@@ -168,7 +181,7 @@ async def _open_checkout(db: AsyncSession, order: Order, student: Student) -> Ch
             amount_paisa=order.amount_paisa,
             currency=order.currency,
             **_return_urls(),
-            ipn_url=None,
+            ipn_url=_ipn_url(),
             customer_name=user.name,
             customer_email=user.email,
             customer_phone=user.phone,
@@ -198,42 +211,49 @@ async def _open_checkout(db: AsyncSession, order: Order, student: Student) -> Ch
 # ---------------------------------------------------------------------------
 
 
-@router.api_route("/payments/return", methods=["GET", "POST"], include_in_schema=True)
-async def payment_return(request: Request, db: AsyncSession = Depends(get_db)):
-    """Where the gateway sends the student's browser, whatever the outcome.
+class SettlementError(Exception):
+    """Settlement could not be decided. Carries the HTTP shape to answer with."""
 
-    Unauthenticated by necessity and safe by construction — see the module
-    docstring. Nothing here trusts a field in the request except as a lookup
-    key; the decision to issue a ticket rests entirely on the server-to-server
-    validation call.
+    def __init__(self, status_code: int, detail: str) -> None:
+        super().__init__(detail)
+        self.status_code = status_code
+        self.detail = detail
+
+
+async def _settle(db: AsyncSession, fields: dict) -> tuple[Order, str]:
+    """Decide what happened to one payment, and issue a ticket if it succeeded.
+
+    Shared by the browser return and the IPN, because those are two reports of
+    the same event and must not reach different conclusions. Whichever arrives
+    first settles the order; the other finds it already `paid` and stops.
+
+    Nothing in `fields` is trusted beyond `tran_id`, which is only a lookup key.
+    The outcome comes from validating `val_id` directly with SSLCommerz.
     """
-    form = dict(await request.form()) if request.method == "POST" else dict(request.query_params)
-    tran_id = str(form.get("tran_id") or "")
+    tran_id = str(fields.get("tran_id") or "")
     if not tran_id:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Missing tran_id")
+        raise SettlementError(status.HTTP_400_BAD_REQUEST, "Missing tran_id")
 
-    order = (
-        await db.execute(select(Order).where(Order.tran_id == tran_id))
-    ).scalar_one_or_none()
+    order = (await db.execute(select(Order).where(Order.tran_id == tran_id))).scalar_one_or_none()
     if order is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Unknown transaction")
+        raise SettlementError(status.HTTP_404_NOT_FOUND, "Unknown transaction")
 
-    # Refreshing the success page must not be an error, and must not issue a
-    # second ticket.
+    # Already settled. A refreshed success page and a duplicate IPN both land
+    # here, and neither may issue a second ticket.
     if order.status is OrderStatus.paid:
-        return _finish(order, "paid")
+        return order, "paid"
 
-    gateway_status = str(form.get("status") or "").upper()
+    gateway_status = str(fields.get("status") or "").upper()
     if gateway_status in {"FAILED", "CANCELLED"}:
         order.status = (
             OrderStatus.cancelled if gateway_status == "CANCELLED" else OrderStatus.failed
         )
         await db.commit()
-        return _finish(order, order.status.value)
+        return order, order.status.value
 
-    val_id = str(form.get("val_id") or "")
+    val_id = str(fields.get("val_id") or "")
     if not val_id:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Missing val_id")
+        raise SettlementError(status.HTTP_400_BAD_REQUEST, "Missing val_id")
 
     try:
         validation = await _gateway.validate(val_id)
@@ -241,8 +261,8 @@ async def payment_return(request: Request, db: AsyncSession = Depends(get_db)):
         # Leave the order pending rather than failing it: the money may well
         # have moved, and the reconciler needs to see it as unsettled.
         logger.error("validation unreachable for order %s: %s", order.id, exc)
-        raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY, "Could not confirm payment, please check your wallet later"
+        raise SettlementError(
+            status.HTTP_502_BAD_GATEWAY, "Could not confirm payment, check your wallet later"
         ) from exc
 
     order.raw_payload = validation
@@ -253,7 +273,7 @@ async def payment_return(request: Request, db: AsyncSession = Depends(get_db)):
     if not payment_succeeded(validation):
         order.status = OrderStatus.failed
         await db.commit()
-        return _finish(order, "failed")
+        return order, "failed"
 
     # A VALID status for the wrong amount is a successful attack if only the
     # status is checked, so the figures are compared before anything is issued.
@@ -268,7 +288,7 @@ async def payment_return(request: Request, db: AsyncSession = Depends(get_db)):
         )
         order.status = OrderStatus.failed
         await db.commit()
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Payment amount mismatch")
+        raise SettlementError(status.HTTP_400_BAD_REQUEST, "Payment amount mismatch")
 
     if risk_flagged(validation):
         # SSLCommerz wants this reviewed. Hold it rather than hand over a ticket
@@ -276,13 +296,59 @@ async def payment_return(request: Request, db: AsyncSession = Depends(get_db)):
         logger.warning("order %s flagged for risk review", order.id)
         order.status = OrderStatus.pending
         await db.commit()
-        return _finish(order, "under_review")
+        return order, "under_review"
 
     order.status = OrderStatus.paid
     order.paid_at = datetime.now(UTC)
     await _issue_ticket(db, order)
-    await db.commit()
-    return _finish(order, "paid")
+    try:
+        await db.commit()
+    except IntegrityError:
+        # The unique on tickets.order_id fired: the IPN and the browser return
+        # raced and the other one already issued. That is success, not failure.
+        await db.rollback()
+        logger.info("ticket for order %s was already issued concurrently", order.id)
+    return order, "paid"
+
+
+@router.api_route("/payments/return", methods=["GET", "POST"])
+async def payment_return(request: Request, db: AsyncSession = Depends(get_db)):
+    """Where the gateway sends the student's browser, whatever the outcome.
+
+    Unauthenticated by necessity and safe by construction — see the module
+    docstring. This is the fast path; the IPN below is the reliable one.
+    """
+    fields = dict(await request.form()) if request.method == "POST" else dict(request.query_params)
+    try:
+        order, outcome = await _settle(db, fields)
+    except SettlementError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from exc
+    return _finish(order, outcome)
+
+
+@router.post("/payments/ipn")
+async def payment_ipn(request: Request, db: AsyncSession = Depends(get_db)):
+    """SSLCommerz reporting the outcome server to server.
+
+    This exists because the browser return cannot be relied on: a student who
+    closes the tab, loses signal, or is redirected through a flaky network
+    never reaches it, and their money is gone with no ticket to show for it.
+    The IPN arrives regardless, which makes it the authoritative path and the
+    return merely the fast one.
+
+    Answers 200 for outcomes SSLCommerz should stop retrying — including
+    failures, which are settled facts. A 5xx is reserved for "ask again later",
+    because that is what a retry can actually fix.
+    """
+    fields = dict(await request.form())
+    try:
+        _order, outcome = await _settle(db, fields)
+    except SettlementError as exc:
+        if exc.status_code >= 500:
+            raise HTTPException(exc.status_code, exc.detail) from exc
+        logger.warning("ipn rejected: %s", exc.detail)
+        return {"received": True, "outcome": "rejected"}
+    return {"received": True, "outcome": outcome}
 
 
 async def _issue_ticket(db: AsyncSession, order: Order) -> None:
