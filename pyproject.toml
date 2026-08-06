@@ -24,6 +24,10 @@ dependencies = [
     # Server-to-server calls to SSLCommerz. A runtime dependency, not a test
     # one: app/core/sslcommerz.py imports it, so the API will not start without.
     "httpx>=0.28",
+    # Renders the boarding QR server-side, for a student who has signal. The
+    # offline path signs on-device instead; this is the online convenience and
+    # the only way to test a scanner before the student app exists.
+    "qrcode[pil]>=8.0",
     # Ed25519 for boarding QR signatures (spec §7.2). Each ticket gets a
     # keypair: the student's device signs, the helper verifies with the public
     # key from its manifest — so a stolen helper phone holds nothing forgeable.

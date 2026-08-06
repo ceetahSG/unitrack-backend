@@ -12,11 +12,13 @@ can therefore only ever produce codes for tickets they own. A helper receives
 phone, which carries the whole fleet's manifest, is worth nothing.
 """
 
+import io
 import logging
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+import qrcode
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,7 +35,14 @@ from app.schemas.commerce import (
     RedemptionBatchOut,
     RedemptionResultOut,
 )
-from app.services.boarding import SLICE_SECONDS, parse_qr
+from app.services.boarding import (
+    SLICE_SECONDS,
+    QrPayload,
+    build_qr,
+    current_slice,
+    new_nonce,
+    parse_qr,
+)
 from app.services.redemption import RedemptionRejected, redeem
 
 logger = logging.getLogger("unitrack.boarding")
@@ -44,6 +53,31 @@ router = APIRouter(tags=["boarding"])
 # ---------------------------------------------------------------------------
 # Student side
 # ---------------------------------------------------------------------------
+
+
+async def _own_active_ticket(
+    db: AsyncSession, principal: Principal, ticket_id: uuid.UUID
+) -> Ticket:
+    """The caller's own active ticket, or a 404.
+
+    The id in the path is never trusted on its own — it is checked against the
+    caller's student row. Without that, anyone could ask for any ticket's
+    private key by guessing a uuid, which would hand them the whole system.
+    "Not yours" and "does not exist" get the same answer, so this cannot be
+    used to discover which ticket ids are real.
+    """
+    student = (
+        await db.execute(select(Student).where(Student.user_id == principal.user_id))
+    ).scalar_one_or_none()
+    if student is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Account has no student profile")
+
+    ticket = await db.get(Ticket, ticket_id)
+    if ticket is None or ticket.student_id != student.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Ticket not found")
+    if ticket.status is not TicketStatus.active:
+        raise HTTPException(status.HTTP_409_CONFLICT, f"Ticket is {ticket.status}")
+    return ticket
 
 
 @router.get("/shop/tickets/{ticket_id}/qr-material", response_model=QrMaterialOut)
@@ -59,20 +93,7 @@ async def qr_material(
     student could ask for any ticket's private key by guessing a uuid, which
     would hand them the whole system.
     """
-    student = (
-        await db.execute(select(Student).where(Student.user_id == principal.user_id))
-    ).scalar_one_or_none()
-    if student is None:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Account has no student profile")
-
-    ticket = await db.get(Ticket, ticket_id)
-    if ticket is None or ticket.student_id != student.id:
-        # Same answer for "does not exist" and "belongs to someone else", so
-        # this cannot be used to discover which ticket ids are real.
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Ticket not found")
-
-    if ticket.status is not TicketStatus.active:
-        raise HTTPException(status.HTTP_409_CONFLICT, f"Ticket is {ticket.status}")
+    ticket = await _own_active_ticket(db, principal, ticket_id)
 
     return QrMaterialOut(
         ticket_id=ticket.id,
@@ -84,6 +105,52 @@ async def qr_material(
         server_time=datetime.now(UTC),
         passenger_count=1,
         valid_to=ticket.valid_to,
+    )
+
+
+@router.get(
+    "/shop/tickets/{ticket_id}/qr.png",
+    response_class=Response,
+    responses={200: {"content": {"image/png": {}}}},
+)
+async def qr_image(
+    ticket_id: uuid.UUID,
+    principal: Principal = Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Render the current boarding code as a PNG.
+
+    The offline path signs on the student's own device (see `qr-material`);
+    this is the online convenience, and the only way to put a real rotating
+    code in front of a scanner before the student app exists.
+
+    Signed here rather than handed over as data because the browser showing it
+    has connectivity by definition — if it did not, it could not have asked.
+
+    Cached nowhere. The code is only valid for its 30-second slice, so a cached
+    image is a rejected passenger; `no-store` also keeps it out of any proxy
+    between here and the phone.
+    """
+    ticket = await _own_active_ticket(db, principal, ticket_id)
+
+    code = build_qr(
+        ticket.qr_private_key,
+        QrPayload(
+            ticket_id=str(ticket.id),
+            passenger_count=1,
+            time_slice=current_slice(datetime.now(UTC).timestamp()),
+            nonce=new_nonce(),
+        ),
+    )
+
+    image = qrcode.make(code, box_size=10, border=2)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+
+    return Response(
+        content=buffer.getvalue(),
+        media_type="image/png",
+        headers={"Cache-Control": "no-store, max-age=0"},
     )
 
 
