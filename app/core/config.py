@@ -37,6 +37,22 @@ class Settings(BaseSettings):
     # Identity — varsity domain allow-list for student signup
     allowed_student_email_domains: str = "ulab.edu.bd"
 
+    # --- Payments (SSLCommerz) ---
+    # `store_passwd` is a credential even in sandbox: it authenticates the
+    # validation call that decides whether a ticket gets issued. Real values
+    # live in .env, which is gitignored.
+    sslcommerz_store_id: str = ""
+    sslcommerz_store_password: str = ""
+    # False targets sandbox.sslcommerz.com. Flip only with live merchant
+    # credentials — sandbox ids do not authenticate against the live host.
+    sslcommerz_live: bool = False
+    # Where the gateway sends the student back. Must be reachable by their
+    # browser, so it is the *public* origin of this API, not a container name.
+    public_base_url: str = "http://localhost:8000"
+    # Where the student's browser lands after we have settled the order. Empty
+    # means the API renders its own minimal confirmation instead.
+    checkout_return_url: str = ""
+
     # Browser origins allowed to call this API, comma-separated. Empty means no
     # CORS headers at all, which is the correct default for a server whose only
     # clients are the Flutter app and curl — a browser blocks cross-origin reads

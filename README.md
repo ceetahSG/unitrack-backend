@@ -42,22 +42,25 @@ Redis + Elasticsearch by [`scripts/smoke_test.py`](scripts/smoke_test.py) (36 ch
 | GPS pipeline: ingest → Redis → worker → Elasticsearch → `/track/nearby` | ✅ |
 | Seat reports + latest-state cache | ✅ |
 | Alerts / SOS + admin console (list / acknowledge / resolve) | ✅ |
+| Token revocation, refresh rotation, `/auth/logout` | ✅ |
+| Commerce: products, orders, SSLCommerz payment, ticket issuance | ✅ |
 
 **Not built yet** — in the spec, not started (roadmap order):
 
 | Area | Notes |
 |---|---|
-| Tickets, wallet, bKash purchase | Blocked on bKash credentials. Payment is the gate; the QR/ride model is designed (spec §7.2/§7.5) |
-| Offline QR validation + fraud sweep | Depends on tickets |
+| Payment reconciler | Nightly diff of the gateway statement against `orders`. Until it exists, an order where neither the browser return nor the IPN ever arrives stays `pending` forever |
+| Offline QR validation + fraud sweep | `tickets.qr_secret` is generated and stored; nothing reads it yet. Spec §7.2/§7.5 |
 | Live-tracking WebSocket `/ws/track/{route_id}` | nginx already carries the upgrade headers |
 | ETA engine | Free path (route-offset + rolling speed) if no Mapbox key |
 | Materialized report tables + admin dashboards | Spec §10 |
+| Admin CRUD for stops and routes | Buses have endpoints; stops/routes are seed-script only |
 | Email/SMTP (verification is logged to stdout for now) | Later phase |
 
 Sibling clients: **[unitrack-helper](https://github.com/mjobayerr/unitrack-helper)**
 (Flutter, functional) · **[unitrack-web](https://github.com/mjobayerr/unitrack-web)**
-(Next.js, not started — so **admin approval currently has no UI**; approve via
-`/docs`, `POST /admin/helpers/{id}/approve`, or the dev seed script).
+(Next.js — admin console works: helper approval and the alerts queue. Student
+PWA not started).
 
 ---
 
@@ -217,6 +220,42 @@ curl "localhost:8000/track/nearby?lat=23.78&lng=90.40&radius_km=5"
 | POST | `/admin/alerts/{id}/acknowledge` | Claim an alert. **admin** |
 | POST | `/admin/alerts/{id}/resolve` | Close an alert with a note. **admin** |
 | GET | `/track/nearby` | Buses within `radius_km`, closest first (ES `geo_distance`). |
+| GET | `/shop/products` | Ticket catalogue. |
+| POST | `/shop/orders` | Start a purchase; returns the gateway checkout URL. Idempotent. **student** |
+| GET | `/shop/orders` | The caller's own orders. **student** |
+| POST | `/shop/payments/return` | Where the gateway sends the browser back. Public by necessity. |
+| POST | `/shop/payments/ipn` | Where the gateway reports server-to-server. Public by necessity. |
+| GET | `/shop/tickets` | The caller's wallet. **student** |
+
+### Payments (SSLCommerz)
+
+**Deviation from the spec.** §7.1 and §9 were written around bKash PGW
+(Grant Token → Create Payment → Execute → Query). The integration is
+**SSLCommerz**, an aggregator that offers bKash alongside cards and other
+wallets, and its flow is different: session init returns a `GatewayPageURL`,
+the student pays there, and the outcome is confirmed by validating a `val_id`
+server-to-server. Order columns are therefore named `gateway_*` rather than
+`bkash_*` — the provider has already changed once.
+
+**Nothing the browser says is trusted.** The student returns via a redirect
+carrying a `val_id`, but that is an ordinary HTTP request anyone can forge by
+typing a URL. A ticket is issued only after a direct call to SSLCommerz
+confirms three things: the status is `VALID`/`VALIDATED`, the settled amount
+**and** currency equal the order's own, and the transaction is not risk-flagged.
+Checking only the status would sell a 100 BDT ticket for 1 BDT.
+
+Two reports of the same payment arrive — the browser return and the IPN — and
+both run the same settlement path so they cannot disagree. Whichever lands
+first settles the order; the other finds it `paid` and stops. A unique
+`tickets.order_id` catches the race if they slip past that check.
+
+Money is stored in **paisa as an integer**, never a float.
+
+`SSLCOMMERZ_STORE_ID` / `SSLCOMMERZ_STORE_PASSWORD` come from the merchant
+panel. For a sandbox store the API password is usually `<store_id>@ssl`, which
+is **not** the password shown in the panel's store-detail view. `ipn_url` is
+only registered when `PUBLIC_BASE_URL` is publicly resolvable, so on localhost
+settlement is redirect-only.
 
 Full contract: `GET /openapi.json` (clients generate types from it). All 20
 endpoints are exercised end-to-end by [`scripts/smoke_test.py`](scripts/smoke_test.py).
@@ -302,11 +341,13 @@ refresh-token rotation/revocation (see [`docs/auth.md`](docs/auth.md) "Known gap
 
 ## What's next
 
-- **Helper app trip UI**: login + refresh, bus/route pickers, Start/Stop bound to the trip endpoints. Then GPS-without-a-trip becomes a 409.
+- **Payment reconciler**: nightly diff of the gateway statement against `orders`, flagging paid-but-no-ticket, ticket-but-no-payment and amount mismatches (spec §9). Closes the last gap where a payment can be lost entirely.
+- **Boarding QR & redemption** (spec §7.2/§7.5): rotating HMAC QR from `tickets.qr_secret`, a `redemptions` table, the helper app scanner and its offline nonce log, then the cross-device fraud sweep. A ticket cannot be used at all until this exists.
+- **Student PWA**: buying is API-only today — no UI. Live map over `/track/nearby` plus the wallet.
+- **Admin CRUD** for stops/routes — buses have endpoints, the rest is `scripts/dev_seed_routes.py`.
 - **Live tracking WebSocket**: `/ws/track/{route_id}` fan-out of position + ETA + seats (spec §7.3 step 4).
-- **Admin CRUD** for stops/routes/buses — seeded by `scripts/dev_seed_routes.py` today.
-- **ETA engine**: Mapbox `driving-traffic` worker job (spec §7.4).
-- **Tickets & offline QR** (spec §7.2/§7.5), **bKash** (§9), **fraud sweep**, **reports** (§10).
+- **ETA engine**: Mapbox `driving-traffic` worker job (spec §7.4), or the free route-offset path.
+- **Reports** (§10) — `orders` and `tickets` now exist to aggregate.
 - **ES hardening**: single-node ES is not durable — add a replica + snapshot policy before production; report/fraud jobs must query ES, not Postgres joins.
 
 Build order: **P1 money & identity → P2 live ops → P3 validation & ETA → P4 reports & polish**.

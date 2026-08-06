@@ -15,7 +15,7 @@ is a build failure rather than a code-review hope.
 
 from fastapi import APIRouter
 
-from app.api.routes import admin, auth, fleet, helper, tracking
+from app.api.routes import admin, auth, fleet, helper, shop, tracking
 
 # Every router in the API. `api_router` is built from this tuple rather than
 # from a list of include_router() calls, so the auth-coverage test and the
@@ -26,6 +26,7 @@ ROUTERS: tuple[APIRouter, ...] = (
     fleet.router,
     helper.router,
     tracking.router,
+    shop.router,
 )
 
 api_router = APIRouter()
@@ -42,6 +43,16 @@ PUBLIC_PATHS: frozenset[str] = frozenset(
         "/auth/verify-email",  # the token in the emailed link IS the credential
         "/auth/login",  # issues the credential
         "/auth/refresh",  # the refresh token IS the credential
+        # The payment gateway redirects the student's browser here with a
+        # form POST that carries no credential of ours. Authenticating it is
+        # impossible; instead nothing in the request is trusted, and the
+        # payment is confirmed by a server-to-server validation call before
+        # any ticket is issued. See app/api/routes/shop.py.
+        "/shop/payments/return",
+        # SSLCommerz posts here server-to-server, so there is no session to
+        # authenticate at all. Same defence as the return: the request is a
+        # lookup key, and the payment is confirmed by calling the gateway back.
+        "/shop/payments/ipn",
         # FastAPI's own docs endpoints.
         "/docs",
         "/docs/oauth2-redirect",
