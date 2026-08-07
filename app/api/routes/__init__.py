@@ -17,6 +17,7 @@ from fastapi import APIRouter
 
 from app.api.routes import (
     admin,
+    admin_catalog,
     auth,
     boarding,
     fleet,
@@ -32,6 +33,7 @@ from app.api.routes import (
 ROUTERS: tuple[APIRouter, ...] = (
     auth.router,
     admin.router,
+    admin_catalog.router,
     fleet.router,
     helper.router,
     tracking.router,

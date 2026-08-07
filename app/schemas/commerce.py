@@ -22,6 +22,58 @@ class ProductOut(BaseModel):
         return f"{self.price_paisa / 100:.2f}"
 
 
+class ProductCreate(BaseModel):
+    """A new thing to sell.
+
+    Priced in **paisa**, like every other amount in this system — 100.00 BDT is
+    `10000`. Taking a decimal here would put a float on the money path, and the
+    order that copies this value is what a student is charged.
+    """
+
+    type: ProductType
+    name: str = Field(min_length=1, max_length=120)
+    price_paisa: int = Field(ge=0)
+    # Null means unlimited rides within the validity window — a monthly pass.
+    # `0` would mean a ticket that can never be used, so the floor is 1.
+    ride_count: int | None = Field(default=None, ge=1)
+    validity_days: int = Field(default=30, ge=1)
+    # Null means valid on every route.
+    route_scope: uuid.UUID | None = None
+    active: bool = True
+
+
+class ProductUpdate(BaseModel):
+    """A partial edit. Unset fields are left alone.
+
+    Every field is optional and `None` is a meaningful value for `route_scope`,
+    so callers must be able to say "clear the route scope" without that being
+    confused with "don't touch it". The handler uses `exclude_unset=True` to
+    tell those apart — without it, every PATCH would silently unscope a product.
+
+    Editing `price_paisa` is safe and does not rewrite history: `orders` copy
+    the amount at purchase time, so a price change only affects future sales.
+    """
+
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    price_paisa: int | None = Field(default=None, ge=0)
+    ride_count: int | None = Field(default=None, ge=1)
+    validity_days: int | None = Field(default=None, ge=1)
+    route_scope: uuid.UUID | None = None
+    active: bool | None = None
+
+
+class AdminProductOut(ProductOut):
+    """A product as the admin console sees it.
+
+    Carries `active`, which `ProductOut` deliberately omits — the shop only ever
+    lists active products, so the field would be a constant `true` there. Here it
+    is the whole point: withdrawing something from sale is how a product is
+    retired, since `orders` and `tickets` reference it forever.
+    """
+
+    active: bool
+
+
 class OrderCreate(BaseModel):
     product_id: uuid.UUID
     # Supplied by the client so a retried request is recognised as the same
