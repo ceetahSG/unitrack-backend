@@ -44,23 +44,26 @@ Redis + Elasticsearch by [`scripts/smoke_test.py`](scripts/smoke_test.py) (36 ch
 | Alerts / SOS + admin console (list / acknowledge / resolve) | ✅ |
 | Token revocation, refresh rotation, `/auth/logout` | ✅ |
 | Commerce: products, orders, SSLCommerz payment, ticket issuance | ✅ |
+| Payment reconciler — settles orders no report ever arrived for (spec §9) | ✅ |
+| Boarding QR: Ed25519 rotating codes, manifest, redemption sync (spec §7.2/§7.5) | ✅ |
+| Cross-device fraud sweep — suspends reused codes, raises an alert | ✅ |
 
 **Not built yet** — in the spec, not started (roadmap order):
 
 | Area | Notes |
 |---|---|
-| Payment reconciler | Nightly diff of the gateway statement against `orders`. Until it exists, an order where neither the browser return nor the IPN ever arrives stays `pending` forever |
-| Offline QR validation + fraud sweep | `tickets.qr_secret` is generated and stored; nothing reads it yet. Spec §7.2/§7.5 |
 | Live-tracking WebSocket `/ws/track/{route_id}` | nginx already carries the upgrade headers |
 | ETA engine | Free path (route-offset + rolling speed) if no Mapbox key |
 | Materialized report tables + admin dashboards | Spec §10 |
 | Admin CRUD for stops and routes | Buses have endpoints; stops/routes are seed-script only |
+| `audit_logs` | Spec §6. Admin actions record `approved_by` / `acknowledged_by` on the row itself; there is no separate trail |
 | Email/SMTP (verification is logged to stdout for now) | Later phase |
 
 Sibling clients: **[unitrack-helper](https://github.com/mjobayerr/unitrack-helper)**
-(Flutter, functional) · **[unitrack-web](https://github.com/mjobayerr/unitrack-web)**
-(Next.js — admin console works: helper approval and the alerts queue. Student
-PWA not started).
+(Flutter — GPS tracking and the offline boarding scanner; APKs build in CI) ·
+**[unitrack-web](https://github.com/mjobayerr/unitrack-web)** (Next.js — admin
+console for helper approval and alerts, student app for wallet, checkout and the
+live map).
 
 ---
 
@@ -335,16 +338,17 @@ Then point the app's release build at it:
 | Cloudflare **Full (Strict)**, never Flexible | Flexible leaves Cloudflare→origin in cleartext |
 | `ufw` to 22 + 443 only | Defense in depth behind the port choices |
 
-Not yet hardened (documented, follow-up): Elasticsearch auth (kept internal-only
-for now), ES replica + snapshot policy, rate limiting on `/auth/login`, and
-refresh-token rotation/revocation (see [`docs/auth.md`](docs/auth.md) "Known gaps").
+Since hardened: Elasticsearch runs with `xpack.security` and the app
+authenticates; `/auth/login` and `/auth/register` are rate limited in nginx
+(5r/m, against the real client IP behind Cloudflare); refresh tokens rotate and
+every token carries a revocable `jti`.
+
+Still open: an ES replica + snapshot policy — single-node ES is not durable.
 
 ## What's next
 
-- **Payment reconciler**: nightly diff of the gateway statement against `orders`, flagging paid-but-no-ticket, ticket-but-no-payment and amount mismatches (spec §9). Closes the last gap where a payment can be lost entirely.
-- **Boarding QR & redemption** (spec §7.2/§7.5): rotating HMAC QR from `tickets.qr_secret`, a `redemptions` table, the helper app scanner and its offline nonce log, then the cross-device fraud sweep. A ticket cannot be used at all until this exists.
-- **Student PWA**: buying is API-only today — no UI. Live map over `/track/nearby` plus the wallet.
 - **Admin CRUD** for stops/routes — buses have endpoints, the rest is `scripts/dev_seed_routes.py`.
+- **`audit_logs`** (spec §6): who did what, as a trail rather than a column on the affected row.
 - **Live tracking WebSocket**: `/ws/track/{route_id}` fan-out of position + ETA + seats (spec §7.3 step 4).
 - **ETA engine**: Mapbox `driving-traffic` worker job (spec §7.4), or the free route-offset path.
 - **Reports** (§10) — `orders` and `tickets` now exist to aggregate.

@@ -13,7 +13,6 @@ in a loop and the request handlers settle exactly one.
 from __future__ import annotations
 
 import logging
-import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -21,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.sslcommerz import amount_matches, payment_succeeded, risk_flagged
 from app.models.commerce import Order, OrderStatus, Ticket, TicketProduct, TicketStatus
+from app.services.boarding import generate_keypair
 
 logger = logging.getLogger("unitrack.settlement")
 
@@ -44,6 +44,11 @@ async def issue_ticket(db: AsyncSession, order: Order) -> None:
         raise RuntimeError(f"order {order.id} references missing product {order.product_id}")
 
     now = datetime.now(UTC)
+    # Per-ticket Ed25519 keypair for the rotating boarding QR (spec §7.2).
+    # Asymmetric rather than the HMAC the spec's formula describes: a helper
+    # only ever needs to *verify*, so their offline manifest carries public keys
+    # and a stolen helper phone cannot forge a code. See app/models/commerce.py.
+    private_key, public_key = generate_keypair()
     db.add(
         Ticket(
             order_id=order.id,
@@ -53,8 +58,8 @@ async def issue_ticket(db: AsyncSession, order: Order) -> None:
             rides_remaining=product.ride_count,
             valid_from=now,
             valid_to=now + timedelta(days=product.validity_days),
-            # Per-ticket HMAC key for the rotating boarding QR (spec §7.2).
-            qr_secret=secrets.token_hex(32),
+            qr_private_key=private_key,
+            qr_public_key=public_key,
             status=TicketStatus.active,
         )
     )
