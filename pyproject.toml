@@ -36,6 +36,10 @@ dependencies = [
     # student by POSTing form-encoded fields, so without it every settlement
     # raises "The `python-multipart` library must be installed".
     "python-multipart>=0.0.20",
+    # Verification email. Async because it is sent from inside the event loop:
+    # stdlib smtplib blocks, and a slow relay would stall every other request
+    # the worker was serving, not just the registration that triggered it.
+    "aiosmtplib>=3.0",
 ]
 
 [dependency-groups]

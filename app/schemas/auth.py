@@ -59,3 +59,13 @@ class UserOut(BaseModel):
     name: str
     role: UserRole
     status: UserStatus
+
+
+class ResendVerification(BaseModel):
+    """Ask for the confirmation link again.
+
+    Only an address. The account cannot be logged into yet — that is the whole
+    problem it solves — so there is no session to authenticate this with.
+    """
+
+    email: EmailStr
