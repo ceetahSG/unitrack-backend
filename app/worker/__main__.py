@@ -4,7 +4,8 @@ Jobs:
   1. GPS ES indexer — read gps_ingest stream, index to Elasticsearch   [wired]
                       (ES is the sole GPS store; Postgres holds no GPS.)
   2. Payment reconciler — settle orders no report ever arrived for     [wired]
-  3. ETA engine    — Mapbox Directions per live trip every 2-3 min   [later]
+  3. ETA engine — arrival times per live trip, cached in Redis         [wired]
+                  (free path: observed speed + schedule delay, no Mapbox)
   4. Fraud sweep — suspend tickets whose code was reused offline      [wired]
   5. Report aggregation                                              [later]
 
@@ -17,6 +18,7 @@ GPS indexing.
 import asyncio
 import logging
 
+from app.worker.eta_engine import run as run_eta_engine
 from app.worker.fraud_sweep import run as run_fraud_sweep
 from app.worker.gps_es_indexer import run as run_gps_es_indexer
 from app.worker.payment_reconciler import run as run_payment_reconciler
@@ -30,6 +32,7 @@ async def main() -> None:
     await asyncio.gather(
         run_gps_es_indexer(),
         run_payment_reconciler(),
+        run_eta_engine(),
         run_fraud_sweep(),
     )
 
