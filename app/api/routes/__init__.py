@@ -54,6 +54,10 @@ PUBLIC_PATHS: frozenset[str] = frozenset(
         "/auth/register/student",  # no account exists yet
         "/auth/register/helper",  # no account exists yet
         "/auth/verify-email",  # the token in the emailed link IS the credential
+        # A student who never received the first email cannot log in to ask for
+        # another — that is the entire problem it solves. Answers 202 whatever
+        # the address is, so it reveals nothing.
+        "/auth/resend-verification",
         "/auth/login",  # issues the credential
         "/auth/refresh",  # the refresh token IS the credential
         # The payment gateway redirects the student's browser here with a

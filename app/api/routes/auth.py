@@ -2,13 +2,14 @@ import logging
 import uuid
 
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_access_claims, get_current_user
 from app.core.config import settings
+from app.core.email import send_verification_email
 from app.core.redis import get_redis
 from app.core.revocation import claim_rotation, is_revoked_strict, recall_rotation, revoke
 from app.core.security import (
@@ -27,6 +28,7 @@ from app.schemas.auth import (
     LoginRequest,
     LogoutRequest,
     RefreshRequest,
+    ResendVerification,
     StudentRegister,
     TokenPair,
     UserOut,
@@ -54,7 +56,11 @@ async def _get_user_by_email(db: AsyncSession, email: str) -> User | None:
 
 
 @router.post("/register/student", response_model=UserOut, status_code=status.HTTP_201_CREATED)
-async def register_student(payload: StudentRegister, db: AsyncSession = Depends(get_db)) -> User:
+async def register_student(
+    payload: StudentRegister,
+    background: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+) -> User:
     # Server-side varsity-email gate (spec §8) — enforced at the API, not just the UI.
     if _email_domain(payload.email) not in settings.student_email_domains:
         raise HTTPException(
@@ -81,10 +87,47 @@ async def register_student(payload: StudentRegister, db: AsyncSession = Depends(
     await db.commit()
     await db.refresh(user)
 
-    token = create_email_verify_token(str(user.id), user.role)
-    # TODO(P4): send via SMTP relay. For now, log the verification link.
-    logger.info("Email verification link: /auth/verify-email?token=%s", token)
+    # After the response, not before it. A mail relay can take seconds or hang;
+    # the account is already committed, and making the student wait on SMTP —
+    # or fail because of it — would trade the valuable thing for the cheap one.
+    background.add_task(
+        send_verification_email,
+        to=user.email,
+        name=user.name,
+        token=create_email_verify_token(str(user.id), user.role),
+    )
     return user
+
+
+@router.post("/resend-verification", status_code=status.HTTP_202_ACCEPTED)
+async def resend_verification(
+    payload: ResendVerification,
+    background: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, str]:
+    """Send the confirmation link again.
+
+    Without this, one email lost to a spam filter is an account its owner can
+    never use and can never re-register, because the address is already taken.
+
+    Always answers 202, whatever is true of the address. Replying "no such
+    account" would turn this into a membership oracle for the whole university —
+    and an unauthenticated one, since anyone who has not verified cannot log in
+    to prove anything. An already-active account is also silently ignored rather
+    than confirmed; the same reasoning applies.
+    """
+    user = await _get_user_by_email(db, payload.email)
+    if user is not None and user.status is UserStatus.pending_email:
+        background.add_task(
+            send_verification_email,
+            to=user.email,
+            name=user.name,
+            token=create_email_verify_token(str(user.id), user.role),
+        )
+    else:
+        logger.info("resend requested for %s — nothing to send", payload.email)
+
+    return {"detail": "If that address needs confirming, a link is on its way."}
 
 
 @router.post("/register/helper", response_model=UserOut, status_code=status.HTTP_201_CREATED)
@@ -149,6 +192,15 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)) -> To
     if not verify_password(payload.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect email or password"
+        )
+    if user.status is UserStatus.pending_email:
+        # Named specifically, unlike the other inactive states. The caller has
+        # just proved they know this password, so nothing is leaked that they
+        # did not already have — and "Account is not active" sends someone who
+        # merely needs to check their inbox looking for an administrator.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Confirm your email address first — check your inbox",
         )
     if user.status != UserStatus.active:
         raise HTTPException(
