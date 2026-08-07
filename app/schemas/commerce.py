@@ -55,9 +55,10 @@ class OrderOut(BaseModel):
 
 
 class TicketOut(BaseModel):
-    # `qr_secret` is deliberately absent. It is the HMAC key for the boarding
-    # QR, and the boarding flow will hand it over through its own endpoint with
-    # its own rules — a wallet listing must not leak every ticket's key.
+    # `qr_private_key` is deliberately absent. It signs boarding codes, so a
+    # wallet listing that carried it would hand over every one of the caller's
+    # signing keys on a screen that only needs to show dates and ride counts.
+    # It leaves the server through `QrMaterialOut` alone, one ticket at a time.
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID

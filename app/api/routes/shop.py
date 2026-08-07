@@ -258,48 +258,13 @@ async def _settle(db: AsyncSession, fields: dict) -> tuple[Order, str]:
             status.HTTP_502_BAD_GATEWAY, "Could not confirm payment, check your wallet later"
         ) from exc
 
-    outcome = await apply_validation(db, order, validation)
-
-    if outcome == AMOUNT_MISMATCH:
-        await db.commit()
-        raise SettlementError(status.HTTP_400_BAD_REQUEST, "Payment amount mismatch")
-
-    try:
-        await db.commit()
-    except IntegrityError:
-        # The unique on tickets.order_id fired: another report of this payment
-        # already issued. That is success, not failure.
-        await db.rollback()
-        logger.info("ticket for order %s was already issued concurrently", order.id)
-        return order, PAID
-
-    return order, outcome
-
-    gateway_status = str(fields.get("status") or "").upper()
-    if gateway_status in {"FAILED", "CANCELLED"}:
-        order.status = (
-            OrderStatus.cancelled if gateway_status == "CANCELLED" else OrderStatus.failed
-        )
-        await db.commit()
-        return order, order.status.value
-
-    val_id = str(fields.get("val_id") or "")
-    if not val_id:
-        raise SettlementError(status.HTTP_400_BAD_REQUEST, "Missing val_id")
-
-    try:
-        validation = await _gateway.validate(val_id)
-    except GatewayError as exc:
-        # Leave the order pending rather than failing it: the money may well
-        # have moved, and the reconciler needs to see it as unsettled.
-        logger.error("validation unreachable for order %s: %s", order.id, exc)
-        raise SettlementError(
-            status.HTTP_502_BAD_GATEWAY, "Could not confirm payment, check your wallet later"
-        ) from exc
-
     # The decision itself lives in app/services/settlement.py, shared with the
     # reconciler: three callers learn about a payment by different routes and
     # must not reach different conclusions about the same money.
+    #
+    # `setdefault` because a response that omits `val_id` would otherwise leave
+    # `orders.gateway_val_id` null — and that column is the handle anyone
+    # arguing with the gateway about this payment has to work from.
     validation.setdefault("val_id", val_id)
     outcome = await apply_validation(db, order, validation)
 
