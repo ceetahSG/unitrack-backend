@@ -328,11 +328,28 @@ Implementation: JWT access (15 min) + refresh (30 d) tokens; role claim checked 
 
 ---
 
-## 9. bKash Integration Notes
-- Use the **PGW Checkout** flow: Grant Token → Create Payment → customer authorizes in bKash UI → Execute Payment → **Query Payment** as final truth.
-- Webhooks: verify signature/credentials, respond fast, process async, and make handling **idempotent** (bKash can deliver duplicates).
-- Store `paymentID` and `trxID` on the order; the nightly reconciler diffs the PGW statement against `orders` and flags: paid-but-no-ticket, ticket-but-no-payment, amount mismatches, refunds.
+## 9. Payment Gateway Integration Notes
+
+> **Implemented deviation: SSLCommerz, not bKash directly.** This section was
+> written around bKash PGW. The build integrates **SSLCommerz**, an aggregator
+> that offers bKash alongside cards and other wallets — a superset of the
+> original intent, reached because SSLCommerz sandbox credentials were
+> available and bKash merchant credentials were not. The principles below all
+> survive; the call sequence does not. Order columns are named `gateway_*`
+> rather than `bkash_*` so a third provider costs no migration.
+
+**As implemented (SSLCommerz):**
+- **Session init** `POST /gwprocess/v4/api.php` with `store_id` + `store_passwd` returns a `GatewayPageURL`; the student pays there.
+- **Validation** `GET /validator/api/validationserverAPI.php?val_id=…` is the final truth, exactly as Query Payment was for bKash. Never trust the redirect: it is an ordinary HTTP request anyone can forge.
+- A ticket is issued only when the status is `VALID`/`VALIDATED`, the settled **amount and currency** equal the order's own, and the transaction is not risk-flagged. Checking status alone would sell a 100 BDT ticket for 1 BDT.
+- Two reports of one payment arrive — the browser return and the IPN — and both run the same settlement path so they cannot disagree. Handling is **idempotent**; duplicates are expected, and a unique `tickets.order_id` is the backstop.
+- Store `val_id` and `bank_tran_id` on the order, plus the whole validation response verbatim, for the nightly reconciler.
+- The reconciler diffs the gateway statement against `orders` and flags: paid-but-no-ticket, ticket-but-no-payment, amount mismatches, refunds. **Not built yet.**
 - Sandbox first; production credentials require the university's merchant account.
+
+**Original bKash plan, retained for when merchant credentials exist:**
+- Use the **PGW Checkout** flow: Grant Token → Create Payment → customer authorizes in bKash UI → Execute Payment → **Query Payment** as final truth.
+- Store `paymentID` and `trxID` on the order.
 
 ---
 

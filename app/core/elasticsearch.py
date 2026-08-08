@@ -28,7 +28,10 @@ def get_es_client() -> AsyncElasticsearch:
     """Process-wide async Elasticsearch client."""
     global _client
     if _client is None:
-        _client = AsyncElasticsearch(hosts=[settings.elasticsearch_url])
+        kwargs: dict = {"hosts": [settings.elasticsearch_url]}
+        if settings.elasticsearch_user and settings.elasticsearch_password:
+            kwargs["basic_auth"] = (settings.elasticsearch_user, settings.elasticsearch_password)
+        _client = AsyncElasticsearch(**kwargs)
     return _client
 
 
