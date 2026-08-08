@@ -231,7 +231,7 @@ async def get_bus_history_path(
         size=limit,
         query={"bool": {"must": filters}},
         sort=[{"ts": {"order": "asc"}}],
-        _source=["bus_id", "trip_id", "ts", "lat", "lng", "speed", "heading", "accuracy"],
+       _source=["bus_id", "trip_id", "ts", "location", "speed", "heading", "accuracy"],
     )
 
     points: list[GpsPoint] = []
@@ -252,8 +252,8 @@ async def get_bus_history_path(
         points.append(
             GpsPoint(
                 timestamp=ts,
-                latitude=float(source.get("lat", 0)),
-                longitude=float(source.get("lng", 0)),
+                latitude=float(source["location"]["lat"]),
+                longitude=float(source["location"]["lon"]),
                 speed=float(source["speed"]) if source.get("speed") else None,
                 heading=float(source["heading"]) if source.get("heading") else None,
                 accuracy=float(source["accuracy"]) if source.get("accuracy") else None,
